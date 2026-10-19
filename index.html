@@ -3,157 +3,292 @@
 <head>
     <title>Dynamic Island</title>
     <style>
-        body {
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
             margin: 0;
             padding: 0;
+            width: 100%;
+            height: 100%;
             background: transparent;
             overflow: hidden;
             user-select: none;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            color: #ffffff;
+            -webkit-font-smoothing: antialiased;
         }
 
         #island {
-            width: 120px;
-            height: 35px;
-            background: rgba(0, 0, 0, 0.95);
+            margin: 14px auto 0 auto;
+            width: 220px;
+            height: 36px;
+            background: #000000;
             border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
             display: flex;
-            align-items: center;
-            padding: 0 10px;
-            box-sizing: border-box;
-            transition: width 0.3s ease-out, height 0.3s ease-out, border-radius 0.3s ease-out, padding 0.3s ease-out;
-            -webkit-app-region: drag;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 6px 12px;
+            transition: width 0.38s cubic-bezier(0.16, 1, 0.3, 1), height 0.38s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.38s cubic-bezier(0.16, 1, 0.3, 1), padding 0.38s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
             cursor: default;
             position: relative;
             overflow: hidden;
         }
 
-        #island:hover {
-            width: 350px;
-            height: 65px;
-            border-radius: 25px;
-            padding: 12px 15px;
+        #island.expanded, #island:hover {
+            width: 380px;
+            height: 165px;
+            border-radius: 32px;
+            padding: 15px 18px 13px 18px;
+            box-shadow: 0 12px 28px -4px rgba(0, 0, 0, 0.45), 0 4px 10px -2px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
         }
 
         .minimal-content {
             display: flex;
             align-items: center;
+            justify-content: space-between;
             width: 100%;
             height: 100%;
             transition: opacity 0.2s ease-out;
         }
 
-        #island:hover .minimal-content {
+        #island.expanded .minimal-content, #island:hover .minimal-content {
             opacity: 0;
             pointer-events: none;
+            display: none;
         }
 
         .minimal-art {
-            width: 20px;
-            height: 20px;
-            border-radius: 4px;
-            background: #333;
+            width: 22px;
+            height: 22px;
+            min-width: 22px;
+            min-height: 22px;
+            border-radius: 6px;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed, #db2777);
+            background-size: cover;
+            background-position: center;
             margin-right: 8px;
             flex-shrink: 0;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .minimal-title {
-            color: white;
-            font-size: 12px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 70px;
-        }
-
-        .expanded-content {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            padding: 12px 15px;
-            box-sizing: border-box;
-            opacity: 0;
-            transition: opacity 0.2s ease-out;
-            pointer-events: none;
-        }
-
-        #island:hover .expanded-content {
-            opacity: 1;
-            pointer-events: all;
-        }
-
-        #album-art {
-            width: 40px;
-            height: 40px;
-            border-radius: 8px;
-            margin-right: 12px;
-            background: #333;
-            flex-shrink: 0;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-        }
-
-        #info {
-            color: white;
-            flex-grow: 1;
-        }
-
-        #title {
-            margin: 0;
-            font-size: 14px;
+            color: rgba(255, 255, 255, 0.95);
+            font-size: 11px;
             font-weight: 500;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            max-width: 120px;
+            letter-spacing: -0.01em;
         }
 
-        #artist {
-            margin: 2px 0 0 0;
-            font-size: 12px;
-            opacity: 0.7;
+        .expanded-content {
+            width: 100%;
+            height: 100%;
+            display: none;
+            flex-direction: column;
+            justify-content: space-between;
+            opacity: 0;
+            transition: opacity 0.2s ease-out;
+        }
+
+        #island.expanded .expanded-content, #island:hover .expanded-content {
+            display: flex;
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        /* Row 1 */
+        .top-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+        }
+
+        .track-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-width: 0;
+            flex: 1;
+        }
+
+        #album-art {
+            width: 52px;
+            height: 52px;
+            min-width: 52px;
+            min-height: 52px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed, #db2777);
+            background-size: cover;
+            background-position: center;
+            flex-shrink: 0;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+        }
+
+        #info {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 0;
+            flex: 1;
+        }
+
+        #title {
+            margin: 0;
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            line-height: 1.2;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            max-width: 200px;
         }
 
-        #controls {
+        #artist {
+            margin: 3px 0 0 0;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 13px;
+            font-weight: 400;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+        }
+
+        /* Soundwave bars */
+        .visualizer {
             display: flex;
-            gap: 8px;
+            align-items: center;
+            gap: 2.5px;
+            height: 20px;
+            flex-shrink: 0;
+            padding-left: 4px;
         }
 
-        .control-button {
-            background: rgba(255, 255, 255, 0.1);
-            border: none;
-            color: white;
-            font-size: 15px;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
+        .mini-visualizer {
+            display: flex;
+            align-items: center;
+            gap: 2.5px;
+            height: 14px;
+            flex-shrink: 0;
+        }
+
+        .visualizer span, .mini-visualizer span {
+            width: 2.5px;
+            border-radius: 9999px;
+            background-color: #38bdf8;
+        }
+
+        @keyframes bar1 { 0%, 100% { height: 4px; } 50% { height: 16px; } }
+        @keyframes bar2 { 0%, 100% { height: 14px; } 50% { height: 5px; } }
+        @keyframes bar3 { 0%, 100% { height: 6px; } 50% { height: 18px; } }
+        @keyframes bar4 { 0%, 100% { height: 12px; } 50% { height: 4px; } }
+        @keyframes bar5 { 0%, 100% { height: 7px; } 50% { height: 15px; } }
+
+        .playing .bar-1 { animation: bar1 0.75s ease-in-out infinite; }
+        .playing .bar-2 { animation: bar2 0.62s ease-in-out infinite; }
+        .playing .bar-3 { animation: bar3 0.88s ease-in-out infinite; }
+        .playing .bar-4 { animation: bar4 0.7s ease-in-out infinite; }
+        .playing .bar-5 { animation: bar5 0.82s ease-in-out infinite; }
+
+        /* Row 2: Progress */
+        .progress-section {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 9999px;
             cursor: pointer;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: #ffffff;
+            border-radius: 9999px;
+            transition: width 0.15s linear;
+        }
+
+        .timestamps {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.5);
+            font-variant-numeric: tabular-nums;
+            line-height: 1;
+        }
+
+        /* Row 3: Controls */
+        .controls-row {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-top: 2px;
+        }
+
+        .icon-btn {
+            background: none;
+            border: none;
+            padding: 4px;
+            cursor: pointer;
+            color: rgba(255, 255, 255, 0.7);
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: all 0.2s ease;
-            -webkit-app-region: no-drag;
+            outline: none;
+            transition: color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
         }
 
-        .control-button:hover {
-            background: rgba(255, 255, 255, 0.2);
-            transform: scale(1.1);
+        .icon-btn:hover {
+            color: #ffffff;
         }
 
-        /* Default state animation */
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(0.95); }
-            100% { transform: scale(1); }
+        .center-controls {
+            display: flex;
+            align-items: center;
+            gap: 28px;
         }
 
-        #island:not(:hover) {
-            animation: pulse 2s infinite;
+        .center-btn {
+            background: none;
+            border: none;
+            padding: 4px;
+            cursor: pointer;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            outline: none;
+            transition: transform 0.15s ease, opacity 0.15s ease;
+        }
+
+        .center-btn:active {
+            transform: scale(0.9);
         }
     </style>
 </head>
@@ -161,21 +296,80 @@
     <div id="island">
         <!-- Minimal content shown by default -->
         <div class="minimal-content">
-            <div class="minimal-art"></div>
-            <div class="minimal-title">Now Playing</div>
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                <div class="minimal-art" id="min-art"></div>
+                <div class="minimal-title" id="min-title">No Media Playing</div>
+            </div>
+            <div class="mini-visualizer" id="min-vis">
+                <span class="bar-1" style="height: 4px;"></span>
+                <span class="bar-2" style="height: 8px;"></span>
+                <span class="bar-3" style="height: 5px;"></span>
+                <span class="bar-4" style="height: 10px;"></span>
+                <span class="bar-5" style="height: 6px;"></span>
+            </div>
         </div>
 
         <!-- Expanded content shown on hover -->
         <div class="expanded-content">
-            <div id="album-art"></div>
-            <div id="info">
-                <p id="title">No media playing</p>
-                <p id="artist"></p>
+            <!-- Row 1: Cover + Title/Artist + Equalizer -->
+            <div class="top-row">
+                <div class="track-left">
+                    <div id="album-art"></div>
+                    <div id="info">
+                        <p id="title">No Media Playing</p>
+                        <p id="artist">Unknown Artist</p>
+                    </div>
+                </div>
+                <div class="visualizer" id="main-vis">
+                    <span class="bar-1" style="height: 4px;"></span>
+                    <span class="bar-2" style="height: 8px;"></span>
+                    <span class="bar-3" style="height: 5px;"></span>
+                    <span class="bar-4" style="height: 10px;"></span>
+                    <span class="bar-5" style="height: 6px;"></span>
+                </div>
             </div>
-            <div id="controls">
-                <button class="control-button" id="prev">⏮</button>
-                <button class="control-button" id="play">⏯</button>
-                <button class="control-button" id="next">⏭</button>
+
+            <!-- Row 2: Progress Bar & Timestamps -->
+            <div class="progress-section">
+                <div class="progress-bar-bg" id="progress-bg">
+                    <div class="progress-bar-fill" id="progress-fill"></div>
+                </div>
+                <div class="timestamps">
+                    <span id="time-pos">0:00</span>
+                    <span id="time-rem">--:--</span>
+                </div>
+            </div>
+
+            <!-- Row 3: Star + Prev/Play/Next + AirPlay -->
+            <div class="controls-row">
+                <button class="icon-btn" id="star-btn" aria-label="Favorite">
+                    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    </svg>
+                </button>
+                <div class="center-controls">
+                    <button class="center-btn" id="prev" aria-label="Previous">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M11 6L3 12l8 6V6zm9 0l-8 6 8 6V6z"/>
+                        </svg>
+                    </button>
+                    <button class="center-btn" id="play" aria-label="Play/Pause">
+                        <svg id="play-icon" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5v14l11-7z"/>
+                        </svg>
+                    </button>
+                    <button class="center-btn" id="next" aria-label="Next">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M5 6l8 6-8 6V6zm9 0l8 6-8 6V6z"/>
+                        </svg>
+                    </button>
+                </div>
+                <button class="icon-btn" id="airplay-btn" aria-label="Audio Output">
+                    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/>
+                        <polygon points="12 15 17 21 7 21 12 15"/>
+                    </svg>
+                </button>
             </div>
         </div>
     </div>

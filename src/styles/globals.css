@@ -4,86 +4,67 @@
 
 :root {
   --foreground-rgb: 255, 255, 255;
-  --background-start-rgb: 0, 0, 0;
-  --background-end-rgb: 0, 0, 0;
 }
 
-body {
-  margin: auto;
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
   padding: 0;
-  margin-top: 20px;
-  background: transparent;
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+  background-color: transparent !important;
   overflow: hidden;
   user-select: none;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
   color: rgb(var(--foreground-rgb));
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-}
-
-
-.dynamic-island-container {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  animation: float 6s ease-in-out infinite;
 }
 
-/* Update the hover state to combine with float animation */
-.dynamic-island-container:hover {
-  animation: none;
-  transform: translateY(-5px);
-  transition: transform 0.3s ease-in-out;
-}
-
-@keyframes float {
-  0% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-20px);
-  }
-  100% {
-    transform: translateY(0px);
-  }
-}
-
-.control-button:hover {
-  opacity: 1 !important;
-  transform: scale(1.1);
-}
-
-/* Default state animation */
-@keyframes subtle-bounce {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(0.98); }
-}
-
-#island:not(:hover) {
-  animation: subtle-bounce 2s infinite;
-}
-
-.dynamic-island {
-  background: rgba(0, 0, 0, 0.95);
+#__next {
+  width: 100%;
+  margin: 0;
+  padding: 0;
   display: flex;
-  box-sizing: border-box;
-  margin: auto;
-  -webkit-box-align: center;
-  cursor: grab;
-  position: relative;
-  overflow: hidden;
-  transition: width 0.3s ease-out, height 0.3s ease-out, border-radius 0.3s ease-out, padding 0.3s ease-out;
-  user-select: none;
+  justify-content: center;
+  align-items: flex-start;
 }
 
-.dynamic-island-collapsed {
-  width: fit-content;
-  height: 35px;
-  border-radius: 20px;
-  padding: 0 10px;
-
+/* Soundbar equalizer visualizer animations */
+@keyframes bar-pulse-1 {
+  0%, 100% { height: 4px; }
+  50% { height: 16px; }
 }
 
-.dynamic-island-expanded {
-  width: max-content;
-  height: 65px;
-  border-radius: 25px;
-  padding: 12px 15px;
+@keyframes bar-pulse-2 {
+  0%, 100% { height: 14px; }
+  50% { height: 5px; }
 }
+
+@keyframes bar-pulse-3 {
+  0%, 100% { height: 6px; }
+  50% { height: 18px; }
+}
+
+@keyframes bar-pulse-4 {
+  0%, 100% { height: 12px; }
+  50% { height: 4px; }
+}
+
+@keyframes bar-pulse-5 {
+  0%, 100% { height: 7px; }
+  50% { height: 15px; }
+}
+
+.anim-bar-1 { animation: bar-pulse-1 0.75s ease-in-out infinite; }
+.anim-bar-2 { animation: bar-pulse-2 0.62s ease-in-out infinite; }
+.anim-bar-3 { animation: bar-pulse-3 0.88s ease-in-out infinite; }
+.anim-bar-4 { animation: bar-pulse-4 0.7s ease-in-out infinite; }
+.anim-bar-5 { animation: bar-pulse-5 0.82s ease-in-out infinite; }

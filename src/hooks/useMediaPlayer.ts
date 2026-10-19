@@ -1,110 +1,101 @@
 import { useState, useEffect } from 'react'
 
-interface DBusValue<T> {
-  signature: string;
-  value: T;
+export interface ProcessedMediaInfo {
+  title: string
+  artist: string
+  artUrl: string
+  duration: number
+  position: number
 }
 
-interface MediaInfo {
-  title?: DBusValue<string>;
-  artist?: DBusValue<string[]>;
-  artUrl?: DBusValue<string>;
-}
+// Accepts plain values or DBus-style { signature, value } wrappers
+const unwrap = (v: any) =>
+  v && typeof v === 'object' && !Array.isArray(v) && 'value' in v ? v.value : v
 
-interface ProcessedMediaInfo {
-  title: string;
-  artist: string;
-  artUrl: string;
+const firstString = (v: any): string => {
+  const u = unwrap(v)
+  if (Array.isArray(u)) return u[0] ?? ''
+  return typeof u === 'string' ? u : ''
 }
 
 export const useMediaPlayer = () => {
   const [currentTrack, setCurrentTrack] = useState<ProcessedMediaInfo | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [position, setPosition] = useState(0)
+  const [duration, setDuration] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const electron = (window as any).electron
-    if (!electron) {
+    if (!electron?.ipcRenderer) {
       setError('Electron not found in window object')
-      console.error('Electron not found in window object')
       return
     }
 
     const { ipcRenderer } = electron
 
-    // Listen for media info updates
-    const mediaInfoHandler = (data: MediaInfo) => {
-      console.log('Raw media info received:', data)
-      if (!data) {
-        console.warn('Received empty media info')
-        return
-      }
+    const mediaInfoHandler = (data: any) => {
+      if (!data) return
+      const trackDuration = typeof data.duration === 'number' ? data.duration : 0
+      const trackPos = typeof data.position === 'number' ? data.position : 0
 
-      // Process the DBus data structure
-      const processedTrack = {
-        title: data.title?.value || 'Not Playing',
-        artist: data.artist?.value?.[0] || 'Unknown Artist',
-        artUrl: data.artUrl?.value || ''
-      }
-
-      console.log('Processed track info:', processedTrack)
-      setCurrentTrack(processedTrack)
+      setCurrentTrack({
+        title: firstString(data.title) || 'Not Playing',
+        artist: firstString(data.artist),
+        artUrl: firstString(data.artUrl),
+        duration: trackDuration,
+        position: trackPos
+      })
+      setDuration(trackDuration)
+      setPosition(trackPos)
     }
 
-    // Listen for playback status updates
-    const playbackStatusHandler = (status: DBusValue<string>) => {
-      console.log('Raw playback status received:', status)
-      const playingStatus = status?.value;
-      if (typeof playingStatus === 'string') {
-        console.log('Setting playback status:', playingStatus)
-        setIsPlaying(playingStatus === 'Playing')
-      } else {
-        console.warn('Received invalid playback status format:', playingStatus)
-      }
+    const playbackStatusHandler = (status: any) => {
+      const s = unwrap(status)
+      if (typeof s === 'string') setIsPlaying(s === 'Playing')
     }
 
-    try {
-      ipcRenderer.on('media-info-update', mediaInfoHandler)
-      ipcRenderer.on('playback-status-update', playbackStatusHandler)
-      
-      console.log('Requesting initial media info...')
-      ipcRenderer.send('get-media-info')
+    const offInfo = ipcRenderer.on('media-info-update', mediaInfoHandler)
+    const offStatus = ipcRenderer.on('playback-status-update', playbackStatusHandler)
 
-      const pollInterval = setInterval(() => {
-        ipcRenderer.send('get-media-info')
-      }, 2000)
+    ipcRenderer.send('get-media-info')
+    const pollInterval = setInterval(() => ipcRenderer.send('get-media-info'), 2000)
 
-      return () => {
-        ipcRenderer.removeListener('media-info-update', mediaInfoHandler)
-        ipcRenderer.removeListener('playback-status-update', playbackStatusHandler)
-        clearInterval(pollInterval)
-      }
-    } catch (err) {
-      setError(`Failed to set up IPC listeners: ${err}`)
-      console.error('IPC setup error:', err)
+    return () => {
+      if (typeof offInfo === 'function') offInfo()
+      if (typeof offStatus === 'function') offStatus()
+      clearInterval(pollInterval)
     }
   }, [])
 
+  // Local ticker to smoothly advance playback timer when playing
+  useEffect(() => {
+    if (!isPlaying || duration <= 0) return
+
+    const timer = setInterval(() => {
+      setPosition((prev) => {
+        if (prev >= duration) return duration
+        return prev + 1
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [isPlaying, duration])
+
+  const send = (action: string, data?: any) => {
+    const electron = (window as any).electron
+    electron?.ipcRenderer?.send(action, data)
+  }
+
   const controls = {
-    playPause: () => {
-      const electron = (window as any).electron
-      if (electron?.ipcRenderer) {
-        electron.ipcRenderer.send('media-control', 'PlayPause')
-      }
-    },
-    next: () => {
-      const electron = (window as any).electron
-      if (electron?.ipcRenderer) {
-        electron.ipcRenderer.send('media-control', 'Next')
-      }
-    },
-    previous: () => {
-      const electron = (window as any).electron
-      if (electron?.ipcRenderer) {
-        electron.ipcRenderer.send('media-control', 'Previous')
-      }
+    playPause: () => send('media-control', 'PlayPause'),
+    next: () => send('media-control', 'Next'),
+    previous: () => send('media-control', 'Previous'),
+    seek: (seconds: number) => {
+      setPosition(seconds)
+      send('media-seek', seconds)
     }
   }
 
-  return { currentTrack, isPlaying, controls, error }
+  return { currentTrack, isPlaying, controls, error, position, duration }
 }

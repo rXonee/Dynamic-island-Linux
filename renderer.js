@@ -1,95 +1,53 @@
 const dbus = require('dbus-next');
 
-// Get DOM elements
+// DOM elements
 const island = document.getElementById('island');
-const minimalTitle = document.querySelector('.minimal-title');
-const title = document.getElementById('title');
-const artist = document.getElementById('artist');
-const controls = document.getElementById('controls');
+const minTitle = document.getElementById('min-title');
+const minArt = document.getElementById('min-art');
+const minVis = document.getElementById('min-vis');
+const albumArt = document.getElementById('album-art');
+const titleElem = document.getElementById('title');
+const artistElem = document.getElementById('artist');
+const mainVis = document.getElementById('main-vis');
+const progressFill = document.getElementById('progress-fill');
+const timePos = document.getElementById('time-pos');
+const timeRem = document.getElementById('time-rem');
+const playIcon = document.getElementById('play-icon');
+const starBtn = document.getElementById('star-btn');
+const airplayBtn = document.getElementById('airplay-btn');
 
-// State management
-let currentSong = '';
-let currentArtist = '';
-let isExpanded = false;
-let expandTimeout;
-let collapseTimeout;
+let activePlayerName = null;
+let isPinned = false;
+let isStarred = false;
+let currentPosition = 0;
+let currentDuration = 0;
+let isPlaying = false;
 
-// Expand/collapse functions
-function expandIsland() {
-    clearTimeout(collapseTimeout);
-    if (!isExpanded) {
-        island.classList.add('expanded');
-        isExpanded = true;
-    }
+function formatTime(seconds) {
+    if (isNaN(seconds) || seconds < 0) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 }
-
-function collapseIsland() {
-    clearTimeout(expandTimeout);
-    if (isExpanded) {
-        collapseTimeout = setTimeout(() => {
-            island.classList.remove('expanded');
-            isExpanded = false;
-        }, 300);
-    }
-}
-
-island.addEventListener('mouseenter', () => {
-    expandIsland();
-});
-
-island.addEventListener('mouseleave', (event) => {
-    if (!controls.contains(event.relatedTarget)) {
-        collapseIsland();
-    }
-});
-
-    controls.addEventListener('mouseenter', () => {
-    expandIsland();
-});
-
-controls.addEventListener('mouseleave', () => {
-    collapseIsland();
-});
-
-
-
-// Test DBus connection
-async function testDBusConnection() {
-    try {
-        const bus = await dbus.sessionBus();
-        const obj = await bus.getProxyObject('org.freedesktop.DBus', '/org/freedesktop/DBus');
-        const iface = obj.getInterface('org.freedesktop.DBus');
-        const names = await iface.ListNames();
-        console.log('Available DBus services:', names);
-        
-        // Look for MPRIS services
-        const mprisServices = names.filter(name => name.startsWith('org.mpris.MediaPlayer2'));
-        console.log('Available MPRIS services:', mprisServices);
-    } catch (error) {
-        console.error('DBus connection test failed:', error);
-    }
-}
-
-testDBusConnection();
 
 async function getActivePlayer() {
     try {
-        const bus = await dbus.sessionBus();
+        const bus = dbus.sessionBus();
         const obj = await bus.getProxyObject('org.freedesktop.DBus', '/org/freedesktop/DBus');
         const iface = obj.getInterface('org.freedesktop.DBus');
         const names = await iface.ListNames();
-        
-        // Specifically look for Spotify
-        const spotifyService = 'org.mpris.MediaPlayer2.spotify';
-        if (names.includes(spotifyService)) {
-            return spotifyService;
+        const mprisServices = names.filter(n => n.startsWith('org.mpris.MediaPlayer2.') && !n.endsWith('.playerctld'));
+
+        for (const name of mprisServices) {
+            try {
+                const proxy = await bus.getProxyObject(name, '/org/mpris/MediaPlayer2');
+                const props = proxy.getInterface('org.freedesktop.DBus.Properties');
+                const statusV = await props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus');
+                if (statusV.value === 'Playing') return name;
+            } catch {}
         }
-        
-        // Fallback to other players if Spotify isn't found
-        const mprisServices = names.filter(name => name.startsWith('org.mpris.MediaPlayer2'));
         return mprisServices[0] || null;
     } catch (error) {
-        console.error('Error getting active player:', error);
         return null;
     }
 }
@@ -97,109 +55,152 @@ async function getActivePlayer() {
 async function updateMediaInfo() {
     try {
         const player = await getActivePlayer();
+        activePlayerName = player;
+
         if (!player) {
-            document.querySelector('.minimal-title').textContent = 'No Media';
-            document.getElementById('title').textContent = 'No media playing';
-            document.getElementById('artist').textContent = '';
-            document.getElementById('album-art').style.backgroundImage = '';
-            document.querySelector('.minimal-art').style.backgroundImage = '';
+            minTitle.textContent = 'No Media Playing';
+            titleElem.textContent = 'No Media Playing';
+            artistElem.textContent = 'Unknown Artist';
+            albumArt.style.backgroundImage = '';
+            minArt.style.backgroundImage = '';
+            minVis.classList.remove('playing');
+            mainVis.classList.remove('playing');
+            progressFill.style.width = '0%';
+            timePos.textContent = '0:00';
+            timeRem.textContent = '--:--';
             return;
         }
 
-        const bus = await dbus.sessionBus();
+        const bus = dbus.sessionBus();
         const obj = await bus.getProxyObject(player, '/org/mpris/MediaPlayer2');
-        const properties = obj.getInterface('org.freedesktop.DBus.Properties');
-        
-        const metadataVariant = await properties.Get('org.mpris.MediaPlayer2.Player', 'Metadata');
-        const metadata = metadataVariant.value;
+        const props = obj.getInterface('org.freedesktop.DBus.Properties');
 
-        let title = metadata['xesam:title']?.value || metadata['xesam:title'] || 'Unknown';
-        let artist = metadata['xesam:artist']?.value?.[0] || metadata['xesam:artist']?.[0] || 'Unknown';
-        let artUrl = metadata['mpris:artUrl']?.value || metadata['mpris:artUrl'] || '';
+        const [metaV, statusV, posV] = await Promise.all([
+            props.Get('org.mpris.MediaPlayer2.Player', 'Metadata'),
+            props.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus'),
+            props.Get('org.mpris.MediaPlayer2.Player', 'Position').catch(() => null)
+        ]);
 
-        // Update minimal view
-        document.querySelector('.minimal-title').textContent = title;
+        const metadata = metaV.value || {};
+        const title = metadata['xesam:title']?.value || metadata['xesam:title'] || 'Unknown';
+        const artistRaw = metadata['xesam:artist']?.value || metadata['xesam:artist'];
+        const artist = Array.isArray(artistRaw) ? artistRaw[0] : (artistRaw || 'Unknown Artist');
+        const artUrl = metadata['mpris:artUrl']?.value || metadata['mpris:artUrl'] || '';
+        const lengthMicro = metadata['mpris:length']?.value || metadata['mpris:length'] || 0;
+
+        currentDuration = lengthMicro ? Math.floor(Number(lengthMicro) / 1000000) : 0;
+        const posMicro = posV ? (posV.value || posV) : 0;
+        currentPosition = posMicro ? Math.floor(Number(posMicro) / 1000000) : 0;
+        isPlaying = (statusV.value === 'Playing');
+
+        minTitle.textContent = title;
+        titleElem.textContent = title;
+        artistElem.textContent = artist;
+
         if (artUrl) {
-            document.querySelector('.minimal-art').style.backgroundImage = `url("${artUrl}")`;
-            document.querySelector('.minimal-art').style.backgroundSize = 'cover';
+            albumArt.style.backgroundImage = `url("${artUrl}")`;
+            minArt.style.backgroundImage = `url("${artUrl}")`;
+        } else {
+            albumArt.style.backgroundImage = '';
+            minArt.style.backgroundImage = '';
         }
 
-        // Update expanded view
-        document.getElementById('title').textContent = title;
-        document.getElementById('artist').textContent = artist;
-        if (artUrl) {
-            document.getElementById('album-art').style.backgroundImage = `url("${artUrl}")`;
-            document.getElementById('album-art').style.backgroundSize = 'cover';
+        // Equalizer animations
+        if (isPlaying) {
+            minVis.classList.add('playing');
+            mainVis.classList.add('playing');
+            playIcon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+        } else {
+            minVis.classList.remove('playing');
+            mainVis.classList.remove('playing');
+            playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
         }
 
-        const playbackStatusVariant = await properties.Get('org.mpris.MediaPlayer2.Player', 'PlaybackStatus');
-        const playbackStatus = playbackStatusVariant.value;
-        const playButton = document.getElementById('play');
-        playButton.textContent = playbackStatus === 'Playing' ? '⏸' : '⏯';
+        // Progress
+        if (currentDuration > 0) {
+            const pct = Math.min(100, Math.max(0, (currentPosition / currentDuration) * 100));
+            progressFill.style.width = `${pct}%`;
+            timePos.textContent = formatTime(currentPosition);
+            timeRem.textContent = `-${formatTime(Math.max(0, currentDuration - currentPosition))}`;
+        } else {
+            progressFill.style.width = '0%';
+            timePos.textContent = '0:00';
+            timeRem.textContent = '--:--';
+        }
 
     } catch (error) {
         console.error('Error updating media info:', error);
-        document.querySelector('.minimal-title').textContent = 'No Media';
-        document.getElementById('title').textContent = 'No media playing';
-        document.getElementById('artist').textContent = '';
-        document.getElementById('album-art').style.backgroundImage = '';
-        document.querySelector('.minimal-art').style.backgroundImage = '';
     }
 }
 
 // Media controls
 async function handleMediaControl(action) {
+    if (!activePlayerName) return;
     try {
-        const bus = await dbus.sessionBus();
-        const player = await bus.getProxyObject('org.mpris.MediaPlayer2.spotify', '/org/mpris/MediaPlayer2');
+        const bus = dbus.sessionBus();
+        const player = await bus.getProxyObject(activePlayerName, '/org/mpris/MediaPlayer2');
         const iface = player.getInterface('org.mpris.MediaPlayer2.Player');
         await iface[action]();
+        setTimeout(updateMediaInfo, 300);
     } catch (error) {
         console.error(`Error executing ${action}:`, error);
     }
 }
 
-// Add click handlers for controls
+// Event listeners
 document.getElementById('prev').addEventListener('click', (e) => {
     e.stopPropagation();
-    handleMediaControl('prev');
+    handleMediaControl('Previous');
 });
 
 document.getElementById('play').addEventListener('click', (e) => {
     e.stopPropagation();
-    handleMediaControl('play');
+    handleMediaControl('PlayPause');
 });
 
 document.getElementById('next').addEventListener('click', (e) => {
     e.stopPropagation();
-    handleMediaControl('next');
+    handleMediaControl('Next');
 });
 
-// Media control handler
-async function handleMediaControl(action) {
-    try {
-        const bus = await dbus.sessionBus();
-        const player = await getActivePlayer();
-        if (!player) return;
-
-        const playerObj = await bus.getProxyObject(player, '/org/mpris/MediaPlayer2');
-        const iface = playerObj.getInterface('org.mpris.MediaPlayer2.Player');
-
-        switch(action) {
-            case 'prev':
-                await iface.Previous();
-                break;
-            case 'play':
-                await iface.PlayPause();
-                break;
-            case 'next':
-                await iface.Next();
-                break;
-        }
-    } catch (error) {
-        console.error(`Error executing ${action}:`, error);
+starBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    isStarred = !isStarred;
+    const poly = starBtn.querySelector('polygon');
+    if (poly) {
+        poly.style.fill = isStarred ? '#facc15' : 'none';
+        poly.style.stroke = isStarred ? '#facc15' : 'currentColor';
     }
-}
+});
 
-// Update the media info every second
-setInterval(updateMediaInfo, 1000);
+airplayBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    isPinned = !isPinned;
+    island.classList.toggle('expanded', isPinned);
+    airplayBtn.style.color = isPinned ? '#38bdf8' : 'rgba(255, 255, 255, 0.7)';
+});
+
+// Click on progress bar to seek
+document.getElementById('progress-bg').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!activePlayerName || currentDuration <= 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const targetSeconds = Math.floor(percent * currentDuration);
+    try {
+        const bus = dbus.sessionBus();
+        const proxy = await bus.getProxyObject(activePlayerName, '/org/mpris/MediaPlayer2');
+        const player = proxy.getInterface('org.mpris.MediaPlayer2.Player');
+        const props = proxy.getInterface('org.freedesktop.DBus.Properties');
+        const metaV = await props.Get('org.mpris.MediaPlayer2.Player', 'Metadata');
+        const trackId = metaV.value?.['mpris:trackid']?.value || metaV.value?.['mpris:trackid'] || '/';
+        if (typeof player.SetPosition === 'function') {
+            await player.SetPosition(trackId, BigInt(targetSeconds * 1000000));
+        }
+        setTimeout(updateMediaInfo, 200);
+    } catch {}
+});
+
+// Periodic update
+setInterval(updateMediaInfo, 1500);
+updateMediaInfo();
