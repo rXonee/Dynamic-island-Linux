@@ -74,6 +74,8 @@ export const DynamicIsland = () => {
 
   // Strictly sized Cover Art with smooth CSS transitions for fluid morphing
   const renderCoverArt = (size: number, borderRadius: number, iconSize: number) => {
+    const hasImage = Boolean(currentTrack?.artUrl && !imgError)
+
     return (
       <div
         style={{
@@ -86,29 +88,35 @@ export const DynamicIsland = () => {
           borderRadius: `${borderRadius}px`,
           overflow: 'hidden',
           flexShrink: 0,
-          boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
-          border: '1px solid rgba(255,255,255,0.12)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+          border: 'none',
+          outline: 'none',
           transition:
             'width 0.46s cubic-bezier(0.22, 1, 0.36, 1), height 0.46s cubic-bezier(0.22, 1, 0.36, 1), min-width 0.46s cubic-bezier(0.22, 1, 0.36, 1), min-height 0.46s cubic-bezier(0.22, 1, 0.36, 1), max-width 0.46s cubic-bezier(0.22, 1, 0.36, 1), max-height 0.46s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.46s cubic-bezier(0.22, 1, 0.36, 1)',
-          background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%)',
+          background: hasImage
+            ? '#000000'
+            : 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           position: 'relative'
         }}
       >
-        {currentTrack?.artUrl && !imgError ? (
+        {hasImage ? (
           <img
-            src={currentTrack.artUrl}
-            alt={currentTrack.title || 'Cover'}
+            src={currentTrack!.artUrl}
+            alt={currentTrack?.title || 'Cover'}
             onError={() => setImgError(true)}
             style={{
               width: '100%',
               height: '100%',
+              borderRadius: `${borderRadius}px`,
               objectFit: 'cover',
               display: 'block',
               userSelect: 'none',
-              pointerEvents: 'none'
+              pointerEvents: 'none',
+              border: 'none',
+              outline: 'none'
             }}
           />
         ) : (
