@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, screen, globalShortcut } = require('electron')
+const { spawn, exec } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 const dbus = require('dbus-next')
@@ -338,12 +339,134 @@ ipcMain.on('get-battery-info', (event) => {
   }
 })
 
+// ---------- Volume Monitoring (PipeWire / PulseAudio) ----------
+let lastVolume = null
+let lastMuted = false
+let pactlSubProcess = null
+
+function fetchVolume() {
+  exec('pactl get-sink-volume @DEFAULT_SINK@ && pactl get-sink-mute @DEFAULT_SINK@', (err, stdout) => {
+    if (err || !stdout) return
+    const volMatch = stdout.match(/(\d+)%/)
+    const muteMatch = stdout.match(/Mute:\s*(yes|no)/i)
+    if (!volMatch) return
+
+    const volume = parseInt(volMatch[1], 10)
+    const isMuted = muteMatch ? muteMatch[1].toLowerCase() === 'yes' : false
+
+    if (lastVolume === null) {
+      lastVolume = volume
+      lastMuted = isMuted
+      return
+    }
+
+    if (lastVolume !== volume || lastMuted !== isMuted) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('volume-alert', { volume, isMuted })
+      }
+      lastVolume = volume
+      lastMuted = isMuted
+    }
+  })
+}
+
+function startVolumeMonitor() {
+  fetchVolume()
+  try {
+    pactlSubProcess = spawn('pactl', ['subscribe'])
+    pactlSubProcess.stdout.on('data', (buf) => {
+      const text = buf.toString()
+      if (text.includes('on sink ') || text.includes('on server')) {
+        fetchVolume()
+      }
+    })
+    pactlSubProcess.on('error', (err) => {
+      console.warn('pactl subscribe error:', err.message)
+    })
+  } catch (e) {
+    console.warn('Failed to start pactl subscribe:', e)
+  }
+}
+
+// ---------- Brightness Monitoring (KDE DBus Signal + Fast Sysfs Fallback) ----------
+let lastBrightness = null
+let brightnessCheckTimer = null
+let kdeBrightnessIface = null
+
+async function initKdeBrightness() {
+  try {
+    if (!bus) return
+    const proxy = await bus.getProxyObject(
+      'org.kde.Solid.PowerManagement',
+      '/org/kde/Solid/PowerManagement/Actions/BrightnessControl'
+    )
+    kdeBrightnessIface = proxy.getInterface('org.kde.Solid.PowerManagement.Actions.BrightnessControl')
+
+    let max = 10000
+    try {
+      max = await kdeBrightnessIface.brightnessMax()
+    } catch {}
+
+    kdeBrightnessIface.on('brightnessChanged', (val) => {
+      const cur = Math.round((Number(val) / Number(max)) * 100)
+      if (lastBrightness !== cur) {
+        lastBrightness = cur
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('brightness-alert', { brightness: cur })
+        }
+      }
+    })
+    console.log('KDE BrightnessControl DBus signal connected')
+  } catch (err) {
+    console.warn('KDE Brightness DBus not available:', err.message)
+  }
+}
+
+function getBrightnessInfo() {
+  const base = '/sys/class/backlight'
+  if (!fs.existsSync(base)) return null
+  try {
+    const entries = fs.readdirSync(base)
+    if (!entries.length) return null
+    const blDir = path.join(base, entries[0])
+    const cur = parseInt(fs.readFileSync(path.join(blDir, 'brightness'), 'utf8').trim(), 10)
+    const max = parseInt(fs.readFileSync(path.join(blDir, 'max_brightness'), 'utf8').trim(), 10)
+    if (isNaN(cur) || isNaN(max) || max <= 0) return null
+    return Math.round((cur / max) * 100)
+  } catch {
+    return null
+  }
+}
+
+function checkBrightness() {
+  const cur = getBrightnessInfo()
+  if (cur === null) return
+  if (lastBrightness === null) {
+    lastBrightness = cur
+    return
+  }
+  if (lastBrightness !== cur) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('brightness-alert', { brightness: cur })
+    }
+    lastBrightness = cur
+  }
+}
+
+function startBrightnessMonitor() {
+  checkBrightness()
+  initKdeBrightness()
+  brightnessCheckTimer = setInterval(checkBrightness, 80)
+}
+
 // ---------- App lifecycle ----------
 
 app.whenReady().then(() => {
   createWindow()
   initializeDBus()
   startBatteryMonitor()
+  startVolumeMonitor()
+  startBrightnessMonitor()
 
   try {
     globalShortcut.register('Alt+D', () => {
@@ -357,6 +480,10 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   if (batteryCheckTimer) clearInterval(batteryCheckTimer)
+  if (brightnessCheckTimer) clearInterval(brightnessCheckTimer)
+  if (pactlSubProcess) {
+    try { pactlSubProcess.kill() } catch {}
+  }
   globalShortcut.unregisterAll()
 })
 

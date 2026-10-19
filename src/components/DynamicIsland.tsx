@@ -20,6 +20,15 @@ interface BatteryAlert {
   isPlugged: boolean
 }
 
+interface VolumeAlert {
+  volume: number
+  isMuted: boolean
+}
+
+interface BrightnessAlert {
+  brightness: number
+}
+
 export const DynamicIsland = () => {
   const [isHovered, setIsHovered] = useState(false)
   const [isPinned, setIsPinned] = useState(false)
@@ -28,7 +37,11 @@ export const DynamicIsland = () => {
   const [currentTime, setCurrentTime] = useState<Date | null>(null)
   const [battery, setBattery] = useState<BatteryInfo | null>(null)
   const [batteryAlert, setBatteryAlert] = useState<BatteryAlert | null>(null)
+  const [volumeAlert, setVolumeAlert] = useState<VolumeAlert | null>(null)
+  const [brightnessAlert, setBrightnessAlert] = useState<BrightnessAlert | null>(null)
+
   const alertTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const hudTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const progressRef = useRef<HTMLDivElement>(null)
 
   const { currentTrack, isPlaying, controls, position, duration } = useMediaPlayer()
@@ -45,16 +58,16 @@ export const DynamicIsland = () => {
     return () => clearInterval(timer)
   }, [])
 
-  // Battery status & alert listeners
+  // Battery, Volume & Brightness listeners
   useEffect(() => {
     const electron = (window as any).electron
     if (!electron?.ipcRenderer) return
 
-    const unsubscribeUpdate = electron.ipcRenderer.on('battery-update', (data: BatteryInfo) => {
+    const unsubscribeBatteryUpdate = electron.ipcRenderer.on('battery-update', (data: BatteryInfo) => {
       setBattery(data)
     })
 
-    const unsubscribeAlert = electron.ipcRenderer.on('battery-alert', (alert: BatteryAlert) => {
+    const unsubscribeBatteryAlert = electron.ipcRenderer.on('battery-alert', (alert: BatteryAlert) => {
       setBatteryAlert(alert)
       if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current)
       alertTimeoutRef.current = setTimeout(() => {
@@ -62,12 +75,33 @@ export const DynamicIsland = () => {
       }, 3500)
     })
 
+    const unsubscribeVolume = electron.ipcRenderer.on('volume-alert', (data: VolumeAlert) => {
+      setBrightnessAlert(null)
+      setVolumeAlert(data)
+      if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current)
+      hudTimeoutRef.current = setTimeout(() => {
+        setVolumeAlert(null)
+      }, 1800)
+    })
+
+    const unsubscribeBrightness = electron.ipcRenderer.on('brightness-alert', (data: BrightnessAlert) => {
+      setVolumeAlert(null)
+      setBrightnessAlert(data)
+      if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current)
+      hudTimeoutRef.current = setTimeout(() => {
+        setBrightnessAlert(null)
+      }, 1800)
+    })
+
     electron.ipcRenderer.send('get-battery-info')
 
     return () => {
-      if (unsubscribeUpdate) unsubscribeUpdate()
-      if (unsubscribeAlert) unsubscribeAlert()
+      if (unsubscribeBatteryUpdate) unsubscribeBatteryUpdate()
+      if (unsubscribeBatteryAlert) unsubscribeBatteryAlert()
+      if (unsubscribeVolume) unsubscribeVolume()
+      if (unsubscribeBrightness) unsubscribeBrightness()
       if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current)
+      if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current)
     }
   }, [])
 
@@ -301,23 +335,28 @@ export const DynamicIsland = () => {
   )
 
   const isAlerting = Boolean(batteryAlert)
+  const isHudActive = Boolean(volumeAlert || brightnessAlert)
 
   return (
     <div
       id="island"
       style={{
         margin: '8px auto 0 auto',
-        width: isExpanded ? '380px' : isAlerting ? '280px' : hasTrack ? '220px' : '255px',
-        height: isExpanded ? '165px' : isAlerting ? '44px' : '36px',
+        width: isExpanded ? '380px' : isHudActive ? '280px' : isAlerting ? '280px' : hasTrack ? '220px' : '255px',
+        height: isExpanded ? '165px' : (isHudActive || isAlerting) ? '44px' : '36px',
         backgroundColor: '#000000',
-        borderRadius: isExpanded ? '32px' : isAlerting ? '22px' : '20px',
-        padding: isExpanded ? '15px 18px 13px 18px' : isAlerting ? '8px 14px' : '6px 14px',
+        borderRadius: isExpanded ? '32px' : (isHudActive || isAlerting) ? '22px' : '20px',
+        padding: isExpanded ? '15px 18px 13px 18px' : (isHudActive || isAlerting) ? '8px 14px' : '6px 14px',
         border: isAlerting
           ? batteryAlert?.type === 'plugged'
             ? '1px solid rgba(16, 185, 129, 0.4)'
             : batteryAlert?.type === 'low'
             ? '1px solid rgba(239, 68, 68, 0.4)'
             : '1px solid rgba(255, 255, 255, 0.2)'
+          : isHudActive
+          ? volumeAlert?.isMuted
+            ? '1px solid rgba(239, 68, 68, 0.35)'
+            : '1px solid rgba(255, 255, 255, 0.22)'
           : '1px solid rgba(255, 255, 255, 0.14)',
         boxShadow: isExpanded
           ? '0 12px 28px -4px rgba(0, 0, 0, 0.45), 0 4px 10px -2px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
@@ -345,8 +384,86 @@ export const DynamicIsland = () => {
       }}
       title="Alt+D atau Klik Kanan untuk Sembunyikan / Munculkan"
     >
-      {/* ================= BATTERY ALERT BANNER (Colok / Cabut / Lemah) ================= */}
-      {isAlerting && !isExpanded ? (
+      {/* ================= HUD ALERT (Volume / Brightness Slider) ================= */}
+      {isHudActive && !isExpanded ? (
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
+          {/* Left Icon */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            {volumeAlert ? (
+              volumeAlert.isMuted || volumeAlert.volume === 0 ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <line x1="23" y1="9" x2="17" y2="15" />
+                  <line x1="17" y1="9" x2="23" y2="15" />
+                </svg>
+              ) : volumeAlert.volume < 50 ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                </svg>
+              )
+            ) : (
+              /* Sun / Brightness Icon */
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+              </svg>
+            )}
+          </div>
+
+          {/* Center Capsule Slider */}
+          <div
+            style={{
+              width: '145px',
+              height: '8px',
+              backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              borderRadius: '9999px',
+              overflow: 'hidden',
+              position: 'relative',
+              flexShrink: 0
+            }}
+          >
+            <div
+              style={{
+                height: '100%',
+                width: `${volumeAlert ? (volumeAlert.isMuted ? 0 : volumeAlert.volume) : (brightnessAlert?.brightness ?? 0)}%`,
+                backgroundColor: volumeAlert?.isMuted ? '#f87171' : '#ffffff',
+                borderRadius: '9999px',
+                transition: 'width 0.12s linear'
+              }}
+            />
+          </div>
+
+          {/* Right Value Text */}
+          <span
+            style={{
+              fontSize: '11px',
+              fontWeight: 600,
+              color: volumeAlert?.isMuted ? '#f87171' : '#ffffff',
+              fontVariantNumeric: 'tabular-nums',
+              minWidth: '34px',
+              textAlign: 'right',
+              flexShrink: 0
+            }}
+          >
+            {volumeAlert ? (volumeAlert.isMuted ? 'Mute' : `${volumeAlert.volume}%`) : `${brightnessAlert?.brightness ?? 0}%`}
+          </span>
+        </div>
+      ) : isAlerting && !isExpanded ? (
+        /* ================= BATTERY ALERT BANNER ================= */
         <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <div
