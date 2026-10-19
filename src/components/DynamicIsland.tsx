@@ -8,12 +8,27 @@ function formatTime(seconds: number) {
   return `${mins}:${secs < 10 ? '0' : ''}${secs}`
 }
 
+interface BatteryInfo {
+  capacity: number
+  status: string
+  isPlugged: boolean
+}
+
+interface BatteryAlert {
+  type: 'plugged' | 'unplugged' | 'low'
+  capacity: number
+  isPlugged: boolean
+}
+
 export const DynamicIsland = () => {
   const [isHovered, setIsHovered] = useState(false)
   const [isPinned, setIsPinned] = useState(false)
   const [isStarred, setIsStarred] = useState(false)
   const [imgError, setImgError] = useState(false)
   const [currentTime, setCurrentTime] = useState<Date | null>(null)
+  const [battery, setBattery] = useState<BatteryInfo | null>(null)
+  const [batteryAlert, setBatteryAlert] = useState<BatteryAlert | null>(null)
+  const alertTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const progressRef = useRef<HTMLDivElement>(null)
 
   const { currentTrack, isPlaying, controls, position, duration } = useMediaPlayer()
@@ -28,6 +43,32 @@ export const DynamicIsland = () => {
       setCurrentTime(new Date())
     }, 1000)
     return () => clearInterval(timer)
+  }, [])
+
+  // Battery status & alert listeners
+  useEffect(() => {
+    const electron = (window as any).electron
+    if (!electron?.ipcRenderer) return
+
+    const unsubscribeUpdate = electron.ipcRenderer.on('battery-update', (data: BatteryInfo) => {
+      setBattery(data)
+    })
+
+    const unsubscribeAlert = electron.ipcRenderer.on('battery-alert', (alert: BatteryAlert) => {
+      setBatteryAlert(alert)
+      if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current)
+      alertTimeoutRef.current = setTimeout(() => {
+        setBatteryAlert(null)
+      }, 3500)
+    })
+
+    electron.ipcRenderer.send('get-battery-info')
+
+    return () => {
+      if (unsubscribeUpdate) unsubscribeUpdate()
+      if (unsubscribeAlert) unsubscribeAlert()
+      if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current)
+    }
   }, [])
 
   // Reset img error when track changes
@@ -57,10 +98,63 @@ export const DynamicIsland = () => {
   const minutes = currentTime ? String(currentTime.getMinutes()).padStart(2, '0') : '--'
   const seconds = currentTime ? String(currentTime.getSeconds()).padStart(2, '0') : '--'
   const timeString = `${hours}:${minutes}`
-  const dateString = currentTime ? `${currentTime.getDate()} ${monthNames[currentTime.getMonth()]} ${currentTime.getFullYear()}` : ''
+  const dateString = currentTime ? `${currentTime.getDate()} ${monthNames[currentTime.getMonth()]}` : ''
   const dayName = currentTime ? dayNames[currentTime.getDay()] : ''
   const fullDayName = currentTime ? fullDayNames[currentTime.getDay()] : ''
   const fullDateString = currentTime ? `${currentTime.getDate()} ${fullMonthNames[currentTime.getMonth()]} ${currentTime.getFullYear()}` : ''
+
+  // Minimal battery icon with dynamic fill level and charging badge
+  const renderBatteryIcon = (capacity: number, isPlugged: boolean) => {
+    const isLow = capacity <= 20
+    const color = isPlugged ? '#10b981' : isLow ? '#f87171' : '#ffffff'
+
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        {isPlugged && (
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="#10b981" style={{ flexShrink: 0 }}>
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+        )}
+        <div
+          style={{
+            width: '18px',
+            height: '9px',
+            borderRadius: '2.5px',
+            border: `1.2px solid ${color}`,
+            padding: '1px',
+            display: 'flex',
+            alignItems: 'center',
+            position: 'relative',
+            flexShrink: 0
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              width: `${Math.min(100, Math.max(0, capacity))}%`,
+              backgroundColor: color,
+              borderRadius: '1px',
+              transition: 'width 0.3s ease'
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              right: '-2.5px',
+              top: '2px',
+              width: '1.5px',
+              height: '3px',
+              backgroundColor: color,
+              borderRadius: '0 1px 1px 0'
+            }}
+          />
+        </div>
+        <span style={{ fontSize: '11px', fontWeight: 600, color, fontVariantNumeric: 'tabular-nums' }}>
+          {capacity}%
+        </span>
+      </div>
+    )
+  }
 
   // Strictly sized Cover Art with inline dimensions to prevent any layout blowout
   const renderCoverArt = (size: number, borderRadius: number, iconSize: number) => {
@@ -206,22 +300,32 @@ export const DynamicIsland = () => {
     </div>
   )
 
+  const isAlerting = Boolean(batteryAlert)
+
   return (
     <div
       id="island"
       style={{
         margin: '8px auto 0 auto',
-        width: isExpanded ? '380px' : hasTrack ? '220px' : '230px',
-        height: isExpanded ? '165px' : '36px',
+        width: isExpanded ? '380px' : isAlerting ? '280px' : hasTrack ? '220px' : '255px',
+        height: isExpanded ? '165px' : isAlerting ? '44px' : '36px',
         backgroundColor: '#000000',
-        borderRadius: isExpanded ? '32px' : '20px',
-        padding: isExpanded ? '15px 18px 13px 18px' : '6px 14px',
-        border: '1px solid rgba(255, 255, 255, 0.14)',
+        borderRadius: isExpanded ? '32px' : isAlerting ? '22px' : '20px',
+        padding: isExpanded ? '15px 18px 13px 18px' : isAlerting ? '8px 14px' : '6px 14px',
+        border: isAlerting
+          ? batteryAlert?.type === 'plugged'
+            ? '1px solid rgba(16, 185, 129, 0.4)'
+            : batteryAlert?.type === 'low'
+            ? '1px solid rgba(239, 68, 68, 0.4)'
+            : '1px solid rgba(255, 255, 255, 0.2)'
+          : '1px solid rgba(255, 255, 255, 0.14)',
         boxShadow: isExpanded
           ? '0 12px 28px -4px rgba(0, 0, 0, 0.45), 0 4px 10px -2px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
+          : isAlerting && batteryAlert?.type === 'plugged'
+          ? '0 4px 16px -2px rgba(16, 185, 129, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
           : '0 4px 12px -2px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
         transition:
-          'width 0.38s cubic-bezier(0.16, 1, 0.3, 1), height 0.38s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.38s cubic-bezier(0.16, 1, 0.3, 1), padding 0.38s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease',
+          'width 0.38s cubic-bezier(0.16, 1, 0.3, 1), height 0.38s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.38s cubic-bezier(0.16, 1, 0.3, 1), padding 0.38s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease',
         cursor: 'default',
         overflow: 'hidden',
         position: 'relative',
@@ -241,53 +345,118 @@ export const DynamicIsland = () => {
       }}
       title="Alt+D atau Klik Kanan untuk Sembunyikan / Munculkan"
     >
-      {/* ================= COLLAPSED / KECIL VIEW ================= */}
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: isExpanded ? 'none' : 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          opacity: isExpanded ? 0 : 1,
-          transition: 'opacity 0.2s ease-out'
-        }}
-      >
-        {hasTrack ? (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-              {renderCoverArt(22, 6, 11)}
+      {/* ================= BATTERY ALERT BANNER (Colok / Cabut / Lemah) ================= */}
+      {isAlerting && !isExpanded ? (
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div
+              style={{
+                width: '26px',
+                height: '26px',
+                borderRadius: '50%',
+                backgroundColor:
+                  batteryAlert?.type === 'plugged'
+                    ? 'rgba(16, 185, 129, 0.2)'
+                    : batteryAlert?.type === 'low'
+                    ? 'rgba(239, 68, 68, 0.2)'
+                    : 'rgba(255, 255, 255, 0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}
+            >
+              {batteryAlert?.type === 'plugged' ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="#10b981">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                </svg>
+              ) : batteryAlert?.type === 'low' ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="7" width="16" height="10" rx="2" ry="2" />
+                  <line x1="22" y1="11" x2="22" y2="13" />
+                </svg>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span
                 style={{
-                  fontSize: '11px',
-                  fontWeight: 500,
-                  color: 'rgba(255, 255, 255, 0.95)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: '120px',
-                  letterSpacing: '-0.01em'
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color:
+                    batteryAlert?.type === 'plugged'
+                      ? '#10b981'
+                      : batteryAlert?.type === 'low'
+                      ? '#ef4444'
+                      : '#ffffff',
+                  lineHeight: '1.2'
                 }}
               >
-                {currentTrack?.title || 'Playing'}
+                {batteryAlert?.type === 'plugged'
+                  ? 'Mengisi Daya'
+                  : batteryAlert?.type === 'low'
+                  ? 'Baterai Lemah!'
+                  : 'Charger Dilepas'}
               </span>
-            </div>
-            {renderVisualizer(true)}
-          </>
-        ) : (
-          <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
-            <span style={{ fontSize: '11px', fontWeight: 500, color: 'rgba(255, 255, 255, 0.85)', letterSpacing: '-0.01em' }}>
-              {dayName ? `${dayName}, ${dateString}` : 'Memuat...'}
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }} />
-              <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff', fontVariantNumeric: 'tabular-nums' }}>
-                {timeString}
+              <span style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.6)', lineHeight: '1.2' }}>
+                {batteryAlert?.capacity}% tersisa
               </span>
             </div>
           </div>
-        )}
-      </div>
+          {renderBatteryIcon(batteryAlert?.capacity ?? 80, batteryAlert?.isPlugged ?? false)}
+        </div>
+      ) : (
+        /* ================= COLLAPSED / KECIL VIEW ================= */
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            display: isExpanded ? 'none' : 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            opacity: isExpanded ? 0 : 1,
+            transition: 'opacity 0.2s ease-out'
+          }}
+        >
+          {hasTrack ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                {renderCoverArt(22, 6, 11)}
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    color: 'rgba(255, 255, 255, 0.95)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: '120px',
+                    letterSpacing: '-0.01em'
+                  }}
+                >
+                  {currentTrack?.title || 'Playing'}
+                </span>
+              </div>
+              {renderVisualizer(true)}
+            </>
+          ) : (
+            <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 500, color: 'rgba(255, 255, 255, 0.85)', letterSpacing: '-0.01em' }}>
+                {dayName ? `${dayName}, ${dateString}` : 'Memuat...'}
+              </span>
+              <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff', fontVariantNumeric: 'tabular-nums' }}>
+                {timeString}
+              </span>
+              {renderBatteryIcon(battery?.capacity ?? 80, battery?.isPlugged ?? true)}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ================= EXPANDED / MEMBESAR VIEW ================= */}
       <div
@@ -561,7 +730,7 @@ export const DynamicIsland = () => {
           </>
         ) : (
           <>
-            {/* Widget Jam & Kalender saat tidak ada media diputar */}
+            {/* Widget Jam, Kalender, & Status Baterai saat tidak ada media diputar */}
             <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -592,11 +761,14 @@ export const DynamicIsland = () => {
               </span>
             </div>
 
-            {/* Bottom Row */}
+            {/* Bottom Row: Status Baterai & Pin */}
             <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '6px' }}>
-              <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.5)' }}>
-                Putar Spotify / YouTube untuk musik
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {renderBatteryIcon(battery?.capacity ?? 80, battery?.isPlugged ?? true)}
+                <span style={{ fontSize: '11px', color: 'rgba(255, 255, 255, 0.5)' }}>
+                  {battery?.isPlugged ? '• Mengisi Daya' : '• Daya Baterai'}
+                </span>
+              </div>
               <button
                 type="button"
                 aria-label="Toggle Pin"

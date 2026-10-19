@@ -252,11 +252,98 @@ ipcMain.on('get-media-info', async () => {
   await updateMediaInfo()
 })
 
+// ---------- Battery Monitoring ----------
+let lastBatteryState = null
+let batteryCheckTimer = null
+
+function getBatteryInfo() {
+  const base = '/sys/class/power_supply'
+  if (!fs.existsSync(base)) return null
+  try {
+    const entries = fs.readdirSync(base)
+    const batName = entries.find((e) => e.startsWith('BAT'))
+    if (!batName) return null
+
+    const batDir = path.join(base, batName)
+    const capacityStr = fs.readFileSync(path.join(batDir, 'capacity'), 'utf8').trim()
+    const statusStr = fs.readFileSync(path.join(batDir, 'status'), 'utf8').trim()
+    const capacity = parseInt(capacityStr, 10) || 0
+
+    let isPlugged = statusStr.toLowerCase() === 'charging' || statusStr.toLowerCase() === 'full'
+    const acName = entries.find((e) => e.startsWith('AC') || e.startsWith('ADP'))
+    if (acName) {
+      try {
+        const onlineStr = fs.readFileSync(path.join(base, acName, 'online'), 'utf8').trim()
+        if (onlineStr === '1') isPlugged = true
+      } catch {}
+    }
+
+    return {
+      capacity,
+      status: statusStr,
+      isPlugged
+    }
+  } catch (err) {
+    return null
+  }
+}
+
+function checkBattery() {
+  const info = getBatteryInfo()
+  if (!info || !mainWindow || mainWindow.isDestroyed()) return
+
+  if (!lastBatteryState) {
+    lastBatteryState = info
+    mainWindow.webContents.send('battery-update', info)
+    return
+  }
+
+  // Cek jika status colokan charger berubah
+  if (lastBatteryState.isPlugged !== info.isPlugged) {
+    mainWindow.webContents.send('battery-alert', {
+      type: info.isPlugged ? 'plugged' : 'unplugged',
+      capacity: info.capacity,
+      isPlugged: info.isPlugged
+    })
+  } else if (!info.isPlugged && info.capacity <= 20 && lastBatteryState.capacity > 20) {
+    // Peringatan baterai lemah
+    mainWindow.webContents.send('battery-alert', {
+      type: 'low',
+      capacity: info.capacity,
+      isPlugged: info.isPlugged
+    })
+  }
+
+  // Kirim update berkala jika ada perubahan kapasitas / status
+  if (
+    lastBatteryState.capacity !== info.capacity ||
+    lastBatteryState.status !== info.status ||
+    lastBatteryState.isPlugged !== info.isPlugged
+  ) {
+    mainWindow.webContents.send('battery-update', info)
+  }
+
+  lastBatteryState = info
+}
+
+function startBatteryMonitor() {
+  checkBattery()
+  batteryCheckTimer = setInterval(checkBattery, 2000)
+}
+
+ipcMain.on('get-battery-info', (event) => {
+  const info = getBatteryInfo()
+  if (info) {
+    event.reply('battery-update', info)
+  }
+})
+
 // ---------- App lifecycle ----------
 
 app.whenReady().then(() => {
   createWindow()
   initializeDBus()
+  startBatteryMonitor()
 
   try {
     globalShortcut.register('Alt+D', () => {
@@ -269,6 +356,7 @@ app.whenReady().then(() => {
 })
 
 app.on('will-quit', () => {
+  if (batteryCheckTimer) clearInterval(batteryCheckTimer)
   globalShortcut.unregisterAll()
 })
 
