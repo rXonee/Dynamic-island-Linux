@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, screen, globalShortcut } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const dbus = require('dbus-next')
@@ -37,13 +37,21 @@ function resolveArtUrl(rawUrl) {
   return rawUrl
 }
 
-// Ukuran window horizontal tetap (lebar tidak berubah agar posisi tengah tidak pernah loncat)
+// Ukuran window tetap (agar posisi tengah tidak pernah loncat dan tidak ada glitch kotak hitam di Linux)
 const WIN_WIDTH = 440
-const COLLAPSED_HEIGHT = 50
-const EXPANDED_HEIGHT = 205
+const WIN_HEIGHT = 220
 
 // Jarak turun dari tepi atas layar (dalam pixel)
 const TOP_MARGIN = 10
+
+function toggleVisibility() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isVisible()) {
+    mainWindow.hide()
+  } else {
+    mainWindow.show()
+  }
+}
 
 function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay()
@@ -53,7 +61,7 @@ function createWindow() {
 
   mainWindow = new BrowserWindow({
     width: WIN_WIDTH,
-    height: COLLAPSED_HEIGHT,
+    height: WIN_HEIGHT,
     x: posX,
     y: posY,
     frame: false,
@@ -233,12 +241,11 @@ ipcMain.on('media-seek', async (event, seconds) => {
 })
 
 ipcMain.on('set-island-expanded', (event, isExpanded) => {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  if (isExpanded) {
-    mainWindow.setSize(WIN_WIDTH, EXPANDED_HEIGHT)
-  } else {
-    mainWindow.setSize(WIN_WIDTH, COLLAPSED_HEIGHT)
-  }
+  // Ukuran window dibiarkan tetap (fixed) agar Linux GTK/Wayland tidak memunculkan glitch kotak hitam
+})
+
+ipcMain.on('toggle-visibility', () => {
+  toggleVisibility()
 })
 
 ipcMain.on('get-media-info', async () => {
@@ -250,6 +257,19 @@ ipcMain.on('get-media-info', async () => {
 app.whenReady().then(() => {
   createWindow()
   initializeDBus()
+
+  try {
+    globalShortcut.register('Alt+D', () => {
+      toggleVisibility()
+    })
+    console.log('Registered global shortcut Alt+D')
+  } catch (err) {
+    console.warn('Failed to register global shortcut Alt+D:', err)
+  }
+})
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
 })
 
 app.on('window-all-closed', () => {
