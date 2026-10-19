@@ -37,15 +37,25 @@ function resolveArtUrl(rawUrl) {
   return rawUrl
 }
 
+// Ukuran window horizontal tetap (lebar tidak berubah agar posisi tengah tidak pernah loncat)
+const WIN_WIDTH = 440
+const COLLAPSED_HEIGHT = 50
+const EXPANDED_HEIGHT = 205
+
+// Jarak turun dari tepi atas layar (dalam pixel)
+const TOP_MARGIN = 10
+
 function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay()
   const screenWidth = primaryDisplay.bounds.width
-  const winWidth = 440
-  const winHeight = 220
+  const posX = Math.round(primaryDisplay.bounds.x + (screenWidth - WIN_WIDTH) / 2)
+  const posY = primaryDisplay.bounds.y + TOP_MARGIN
 
   mainWindow = new BrowserWindow({
-    width: winWidth,
-    height: winHeight,
+    width: WIN_WIDTH,
+    height: COLLAPSED_HEIGHT,
+    x: posX,
+    y: posY,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -60,14 +70,6 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     }
   })
-
-  // Jarak turun dari tepi atas layar (dalam pixel)
-  // Ubah angka ini: makin besar, makin turun ke bawah (misal: 12, 16, 20)
-  const TOP_MARGIN = 40
-
-  const posX = Math.round(primaryDisplay.bounds.x + (primaryDisplay.bounds.width - winWidth) / 2)
-  const posY = primaryDisplay.bounds.y + TOP_MARGIN
-  mainWindow.setPosition(posX, posY)
 
   const isDev = process.env.NODE_ENV === 'development'
   if (isDev) {
@@ -227,6 +229,15 @@ ipcMain.on('media-seek', async (event, seconds) => {
     }
   } catch (error) {
     console.error('Failed to seek:', error)
+  }
+})
+
+ipcMain.on('set-island-expanded', (event, isExpanded) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (isExpanded) {
+    mainWindow.setSize(WIN_WIDTH, EXPANDED_HEIGHT)
+  } else {
+    mainWindow.setSize(WIN_WIDTH, COLLAPSED_HEIGHT)
   }
 })
 

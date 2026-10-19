@@ -14,11 +14,46 @@ export const DynamicIsland = () => {
   const [isStarred, setIsStarred] = useState(false)
   const [imgError, setImgError] = useState(false)
   const progressRef = useRef<HTMLDivElement>(null)
+  const collapseTimer = useRef<NodeJS.Timeout | null>(null)
 
   const { currentTrack, isPlaying, controls, position, duration } = useMediaPlayer()
 
   const isExpanded = isHovered || isPinned
   const hasTrack = Boolean(currentTrack?.title && currentTrack.title !== 'Not Playing' && currentTrack.title !== 'Unknown')
+
+  const handleMouseEnter = () => {
+    if (collapseTimer.current) {
+      clearTimeout(collapseTimer.current)
+      collapseTimer.current = null
+    }
+    setIsHovered(true)
+    const electron = (window as any).electron
+    electron?.ipcRenderer?.send('set-island-expanded', true)
+  }
+
+  const handleMouseLeave = () => {
+    setIsHovered(false)
+    if (!isPinned) {
+      collapseTimer.current = setTimeout(() => {
+        const electron = (window as any).electron
+        electron?.ipcRenderer?.send('set-island-expanded', false)
+      }, 500)
+    }
+  }
+
+  const handleTogglePin = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const nextPinned = !isPinned
+    setIsPinned(nextPinned)
+    const electron = (window as any).electron
+    if (nextPinned) {
+      electron?.ipcRenderer?.send('set-island-expanded', true)
+    } else if (!isHovered) {
+      collapseTimer.current = setTimeout(() => {
+        electron?.ipcRenderer?.send('set-island-expanded', false)
+      }, 500)
+    }
+  }
 
   // Reset img error when track changes
   useEffect(() => {
@@ -37,25 +72,32 @@ export const DynamicIsland = () => {
   const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (position / duration) * 100)) : 0
   const remainingTime = duration > 0 ? Math.max(0, duration - position) : 0
 
-  // Strictly sized Cover Art with inline dimensions to prevent any layout blowout
+  // Strictly sized Cover Art with smooth CSS transitions for fluid morphing
   const renderCoverArt = (size: number, borderRadius: number, iconSize: number) => {
-    if (currentTrack?.artUrl && !imgError) {
-      return (
-        <div
-          style={{
-            width: `${size}px`,
-            height: `${size}px`,
-            minWidth: `${size}px`,
-            minHeight: `${size}px`,
-            maxWidth: `${size}px`,
-            maxHeight: `${size}px`,
-            borderRadius: `${borderRadius}px`,
-            overflow: 'hidden',
-            flexShrink: 0,
-            boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
-            border: '1px solid rgba(255,255,255,0.1)'
-          }}
-        >
+    return (
+      <div
+        style={{
+          width: `${size}px`,
+          height: `${size}px`,
+          minWidth: `${size}px`,
+          minHeight: `${size}px`,
+          maxWidth: `${size}px`,
+          maxHeight: `${size}px`,
+          borderRadius: `${borderRadius}px`,
+          overflow: 'hidden',
+          flexShrink: 0,
+          boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          transition:
+            'width 0.46s cubic-bezier(0.22, 1, 0.36, 1), height 0.46s cubic-bezier(0.22, 1, 0.36, 1), min-width 0.46s cubic-bezier(0.22, 1, 0.36, 1), min-height 0.46s cubic-bezier(0.22, 1, 0.36, 1), max-width 0.46s cubic-bezier(0.22, 1, 0.36, 1), max-height 0.46s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.46s cubic-bezier(0.22, 1, 0.36, 1)',
+          background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          position: 'relative'
+        }}
+      >
+        {currentTrack?.artUrl && !imgError ? (
           <img
             src={currentTrack.artUrl}
             alt={currentTrack.title || 'Cover'}
@@ -69,46 +111,23 @@ export const DynamicIsland = () => {
               pointerEvents: 'none'
             }}
           />
-        </div>
-      )
-    }
-
-    // Modern Apple Music fallback gradient
-    return (
-      <div
-        style={{
-          width: `${size}px`,
-          height: `${size}px`,
-          minWidth: `${size}px`,
-          minHeight: `${size}px`,
-          maxWidth: `${size}px`,
-          maxHeight: `${size}px`,
-          borderRadius: `${borderRadius}px`,
-          overflow: 'hidden',
-          flexShrink: 0,
-          background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #db2777 100%)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
-          border: '1px solid rgba(255,255,255,0.15)'
-        }}
-      >
-        <svg
-          width={iconSize}
-          height={iconSize}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="white"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{ opacity: 0.95 }}
-        >
-          <path d="M9 18V5l12-2v13" />
-          <circle cx="6" cy="18" r="3" fill="white" />
-          <circle cx="18" cy="16" r="3" fill="white" />
-        </svg>
+        ) : (
+          <svg
+            width={iconSize}
+            height={iconSize}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ opacity: 0.95, transition: 'width 0.46s ease, height 0.46s ease' }}
+          >
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" fill="white" />
+            <circle cx="18" cy="16" r="3" fill="white" />
+          </svg>
+        )}
       </div>
     )
   }
@@ -181,131 +200,140 @@ export const DynamicIsland = () => {
     <div
       id="island"
       style={{
-        margin: '14px auto 0 auto',
+        margin: '6px auto 0 auto',
         width: isExpanded ? '380px' : hasTrack ? '220px' : '120px',
         height: isExpanded ? '165px' : '36px',
         backgroundColor: '#000000',
         borderRadius: isExpanded ? '32px' : '20px',
-        padding: isExpanded ? '15px 18px 13px 18px' : '6px 12px',
+        padding: isExpanded ? '14px 18px 12px 18px' : '7px 12px',
         border: '1px solid rgba(255, 255, 255, 0.14)',
         boxShadow: isExpanded
-          ? '0 12px 28px -4px rgba(0, 0, 0, 0.45), 0 4px 10px -2px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
-          : '0 4px 12px -2px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+          ? '0 6px 16px -2px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15)'
+          : '0 2px 8px -1px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
         transition:
-          'width 0.38s cubic-bezier(0.16, 1, 0.3, 1), height 0.38s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.38s cubic-bezier(0.16, 1, 0.3, 1), padding 0.38s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease',
+          'width 0.46s cubic-bezier(0.22, 1, 0.36, 1), height 0.46s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.46s cubic-bezier(0.22, 1, 0.36, 1), padding 0.46s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.4s ease',
         cursor: 'default',
         overflow: 'hidden',
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'space-between',
+        justifyContent: 'flex-start',
         color: '#ffffff',
         userSelect: 'none',
         boxSizing: 'border-box'
       }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
-      {/* ================= COLLAPSED / KECIL VIEW ================= */}
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: isExpanded ? 'none' : 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          opacity: isExpanded ? 0 : 1,
-          transition: 'opacity 0.2s ease-out'
-        }}
-      >
-        {hasTrack ? (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-              {renderCoverArt(22, 6, 11)}
-              <span
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 500,
-                  color: 'rgba(255, 255, 255, 0.95)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: '120px',
-                  letterSpacing: '-0.01em'
-                }}
-              >
-                {currentTrack?.title || 'Playing'}
-              </span>
-            </div>
-            {renderVisualizer(true)}
-          </>
-        ) : (
-          <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#171717', border: '1px solid #333' }} />
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }} />
-          </div>
-        )}
-      </div>
-
-      {/* ================= EXPANDED / MEMBESAR SEPERTI DI FOTO ================= */}
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: isExpanded ? 'flex' : 'none',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          opacity: isExpanded ? 1 : 0,
-          transition: 'opacity 0.2s ease-out'
-        }}
-      >
-        {/* ROW 1: Cover + Title/Artist + Equalizer */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
-            {/* 52x52 Album Cover */}
-            {renderCoverArt(52, 14, 24)}
-
-            {/* Title & Artist */}
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0, flex: 1 }}>
-              <p
-                style={{
-                  margin: 0,
-                  color: '#ffffff',
-                  fontSize: '15px',
-                  fontWeight: 600,
-                  letterSpacing: '-0.02em',
-                  lineHeight: '1.2',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: '200px'
-                }}
-              >
-                {currentTrack?.title || 'No Media Playing'}
-              </p>
-              <p
-                style={{
-                  margin: '3px 0 0 0',
-                  color: 'rgba(255, 255, 255, 0.6)',
-                  fontSize: '13px',
-                  fontWeight: 400,
-                  lineHeight: '1.2',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  maxWidth: '200px'
-                }}
-              >
-                {currentTrack?.artist || 'Unknown Artist'}
-              </p>
-            </div>
-          </div>
-
-          {/* Cyan Soundwave Visualizer on Right */}
-          <div style={{ paddingLeft: '4px', flexShrink: 0 }}>
-            {renderVisualizer(false)}
-          </div>
+      {!hasTrack && !isExpanded ? (
+        <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+          <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#171717', border: '1px solid #333' }} />
+          <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }} />
         </div>
+      ) : (
+        <>
+          {/* ================= ROW 1: PERSISTENT MORPHING (Cover + Title/Artist + Equalizer) ================= */}
+          <div
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: isExpanded ? '14px' : '8px',
+              transition: 'gap 0.46s cubic-bezier(0.22, 1, 0.36, 1)',
+              flexShrink: 0
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: isExpanded ? '14px' : '8px', minWidth: 0, flex: 1, transition: 'gap 0.46s cubic-bezier(0.22, 1, 0.36, 1)' }}>
+              {/* Morphing Album Cover */}
+              {renderCoverArt(isExpanded ? 52 : 22, isExpanded ? 14 : 6, isExpanded ? 24 : 11)}
+
+              {/* Title & Artist */}
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0, flex: 1 }}>
+                <p
+                  style={{
+                    margin: 0,
+                    color: '#ffffff',
+                    fontSize: isExpanded ? '15px' : '11px',
+                    fontWeight: isExpanded ? 600 : 500,
+                    letterSpacing: '-0.02em',
+                    lineHeight: isExpanded ? '1.2' : '1.1',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    maxWidth: isExpanded ? '200px' : '120px',
+                    transition: 'font-size 0.46s cubic-bezier(0.22, 1, 0.36, 1), max-width 0.46s cubic-bezier(0.22, 1, 0.36, 1)'
+                  }}
+                >
+                  {currentTrack?.title || (hasTrack ? 'Playing' : 'No Media Playing')}
+                </p>
+
+                {/* Subtitle Artist Name */}
+                <div
+                  style={{
+                    maxHeight: isExpanded ? '22px' : '0px',
+                    opacity: isExpanded ? 1 : 0,
+                    overflow: 'hidden',
+                    transition: isExpanded
+                      ? 'max-height 0.46s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease 0.1s'
+                      : 'max-height 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.15s ease'
+                  }}
+                >
+                  <p
+                    style={{
+                      margin: '3px 0 0 0',
+                      color: 'rgba(255, 255, 255, 0.6)',
+                      fontSize: '13px',
+                      fontWeight: 400,
+                      lineHeight: '1.2',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: '200px'
+                    }}
+                  >
+                    {currentTrack?.artist || 'Unknown Artist'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Cyan Soundwave Visualizer on Right */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                flexShrink: 0,
+                transform: isExpanded ? 'scale(1.15)' : 'scale(1)',
+                transformOrigin: 'right center',
+                transition: 'transform 0.46s cubic-bezier(0.22, 1, 0.36, 1)'
+              }}
+            >
+              {renderVisualizer(true)}
+            </div>
+          </div>
+
+          {/* ================= BOTTOM SECTION: Scrubber + Controls (revealed on expand) ================= */}
+          <div
+            style={{
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              marginTop: isExpanded ? '14px' : '0px',
+              maxHeight: isExpanded ? '90px' : '0px',
+              opacity: isExpanded ? 1 : 0,
+              transform: isExpanded ? 'translateY(0px) scale(1)' : 'translateY(6px) scale(0.96)',
+              transformOrigin: 'top center',
+              pointerEvents: isExpanded ? 'auto' : 'none',
+              overflow: 'hidden',
+              flexShrink: 0,
+              transition: isExpanded
+                ? 'max-height 0.46s cubic-bezier(0.22, 1, 0.36, 1), margin-top 0.46s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.32s ease 0.1s, transform 0.46s cubic-bezier(0.22, 1, 0.36, 1) 0.1s'
+                : 'max-height 0.42s cubic-bezier(0.22, 1, 0.36, 1), margin-top 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.28s ease, transform 0.42s cubic-bezier(0.22, 1, 0.36, 1)'
+            }}
+          >
 
         {/* ROW 2: Scrubber Bar + Timestamps */}
         <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -481,10 +509,7 @@ export const DynamicIsland = () => {
           <button
             type="button"
             aria-label="Audio Output"
-            onClick={(e) => {
-              e.stopPropagation()
-              setIsPinned(!isPinned)
-            }}
+            onClick={handleTogglePin}
             title={isPinned ? 'Unpin' : 'Pin Open'}
             style={{
               background: 'none',
@@ -514,7 +539,9 @@ export const DynamicIsland = () => {
             </svg>
           </button>
         </div>
-      </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -5,9 +5,8 @@ console.log('Preload script is running...')
 
 contextBridge.exposeInMainWorld('electron', {
   ipcRenderer: {
-    send: (channel, data) => {
-      console.log(`Sending IPC message on channel ${channel}:`, data)
-      ipcRenderer.send(channel, data)
+    send: (channel, ...args) => {
+      ipcRenderer.send(channel, ...args)
     },
     on: (channel, func) => {
       console.log(`Setting up IPC listener for channel: ${channel}`)
