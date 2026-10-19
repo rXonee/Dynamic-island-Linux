@@ -194,18 +194,127 @@ async function updateMediaInfo() {
     const posMicro = posV ? unwrap(posV) : 0
     const position = posMicro ? Math.floor(Number(posMicro) / 1000000) : 0
 
+    const trackTitle = unwrap(metadata['xesam:title']) || 'Unknown'
+    const artistName = Array.isArray(artist) ? artist[0] : artist || 'Unknown Artist'
+
     mainWindow?.webContents.send('media-info-update', {
-      title: unwrap(metadata['xesam:title']) || 'Unknown',
-      artist: Array.isArray(artist) ? artist[0] : artist || 'Unknown Artist',
+      title: trackTitle,
+      artist: artistName,
       artUrl: resolveArtUrl(rawArt),
       duration,
       position
     })
     mainWindow?.webContents.send('playback-status-update', statusV.value)
+
+    if (trackTitle !== 'Unknown' && trackTitle !== 'Not Playing') {
+      fetchLyrics(trackTitle, artistName, duration)
+    }
   } catch (error) {
     console.error('Failed to update media info:', error)
   }
 }
+
+// ---------- Synced Lyrics (LRCLIB) ----------
+let lastLyricsKey = ''
+
+function cleanSongTitle(str) {
+  if (!str) return ''
+  return str
+    .replace(/\(.*?\)/g, '')
+    .replace(/\[.*?\]/g, '')
+    .replace(/ - .*/g, '')
+    .trim()
+}
+
+function parseLRC(lrcText) {
+  if (!lrcText) return []
+  const lines = lrcText.split('\n')
+  const result = []
+  for (const line of lines) {
+    const match = line.match(/\[(\d{2}):(\d{2})\.?(\d{2,3})?\](.*)/)
+    if (match) {
+      const min = parseInt(match[1], 10)
+      const sec = parseInt(match[2], 10)
+      const ms = match[3] ? parseInt(match[3].padEnd(3, '0').slice(0, 3), 10) : 0
+      const time = min * 60 + sec + ms / 1000
+      const text = match[4].trim()
+      if (text) {
+        result.push({ time, text })
+      }
+    }
+  }
+  return result.sort((a, b) => a.time - b.time)
+}
+
+async function fetchLyrics(rawTitle, rawArtist, duration) {
+  const trackKey = `${rawTitle}-${rawArtist}`
+  if (trackKey === lastLyricsKey || !rawTitle || rawTitle === 'Unknown' || rawTitle === 'Not Playing') {
+    return
+  }
+  lastLyricsKey = trackKey
+
+  try {
+    const cleanT = cleanSongTitle(rawTitle) || rawTitle
+    const cleanA = cleanSongTitle(rawArtist) || rawArtist
+
+    let url = `https://lrclib.net/api/get?track_name=${encodeURIComponent(cleanT)}&artist_name=${encodeURIComponent(cleanA)}`
+    if (duration > 0) url += `&duration=${duration}`
+
+    let res = await fetch(url)
+    let data = null
+    if (res.ok) {
+      data = await res.json()
+    } else {
+      const searchRes = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(`${cleanT} ${cleanA}`)}`)
+      if (searchRes.ok) {
+        const results = await searchRes.json()
+        if (Array.isArray(results) && results.length > 0) {
+          data = results.find((r) => r.syncedLyrics) || results[0]
+        }
+      }
+    }
+
+    if (data && (data.syncedLyrics || data.plainLyrics)) {
+      let lines = parseLRC(data.syncedLyrics)
+      if (lines.length === 0 && data.plainLyrics) {
+        lines = data.plainLyrics
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .map((text) => ({ time: -1, text }))
+      }
+      mainWindow?.webContents.send('lyrics-update', {
+        title: rawTitle,
+        artist: rawArtist,
+        lines,
+        plainLyrics: data.plainLyrics || '',
+        notFound: lines.length === 0
+      })
+    } else {
+      mainWindow?.webContents.send('lyrics-update', {
+        title: rawTitle,
+        artist: rawArtist,
+        lines: [],
+        plainLyrics: '',
+        notFound: true
+      })
+    }
+  } catch (err) {
+    console.warn('Failed to fetch lyrics:', err.message)
+    mainWindow?.webContents.send('lyrics-update', {
+      title: rawTitle,
+      artist: rawArtist,
+      lines: [],
+      plainLyrics: '',
+      notFound: true
+    })
+  }
+}
+
+ipcMain.on('get-lyrics', (event, { title, artist, duration }) => {
+  lastLyricsKey = ''
+  fetchLyrics(title, artist, duration)
+})
 
 // ---------- IPC ----------
 

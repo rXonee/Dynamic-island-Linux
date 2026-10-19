@@ -10,6 +10,29 @@
   box-sizing: border-box;
 }
 
+/* Sembunyikan scrollbar di semua browser (Chromium/WebKit & Firefox) */
+::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+* {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -68,3 +91,8 @@ html, body {
 .anim-bar-3 { animation: bar-pulse-3 0.88s ease-in-out infinite; }
 .anim-bar-4 { animation: bar-pulse-4 0.7s ease-in-out infinite; }
 .anim-bar-5 { animation: bar-pulse-5 0.82s ease-in-out infinite; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

@@ -29,6 +29,19 @@ interface BrightnessAlert {
   brightness: number
 }
 
+interface LyricLine {
+  time: number
+  text: string
+}
+
+interface LyricsData {
+  title: string
+  artist: string
+  lines: LyricLine[]
+  plainLyrics: string
+  notFound?: boolean
+}
+
 export const DynamicIsland = () => {
   const [isHovered, setIsHovered] = useState(false)
   const [isPinned, setIsPinned] = useState(false)
@@ -39,14 +52,18 @@ export const DynamicIsland = () => {
   const [batteryAlert, setBatteryAlert] = useState<BatteryAlert | null>(null)
   const [volumeAlert, setVolumeAlert] = useState<VolumeAlert | null>(null)
   const [brightnessAlert, setBrightnessAlert] = useState<BrightnessAlert | null>(null)
+  const [lyrics, setLyrics] = useState<LyricLine[]>([])
+  const [lyricsStatus, setLyricsStatus] = useState<'idle' | 'loading' | 'found' | 'not-found'>('idle')
+  const [showLyrics, setShowLyrics] = useState(false)
 
   const alertTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const hudTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const progressRef = useRef<HTMLDivElement>(null)
+  const lyricsContainerRef = useRef<HTMLDivElement>(null)
 
   const { currentTrack, isPlaying, controls, position, duration } = useMediaPlayer()
 
-  const isExpanded = isHovered || isPinned
+  const isExpanded = isHovered || isPinned || showLyrics
   const hasTrack = Boolean(currentTrack?.title && currentTrack.title !== 'Not Playing' && currentTrack.title !== 'Unknown')
 
   // Realtime Clock timer
@@ -58,7 +75,7 @@ export const DynamicIsland = () => {
     return () => clearInterval(timer)
   }, [])
 
-  // Battery, Volume & Brightness listeners
+  // Battery, Volume, Brightness & Lyrics listeners
   useEffect(() => {
     const electron = (window as any).electron
     if (!electron?.ipcRenderer) return
@@ -93,6 +110,16 @@ export const DynamicIsland = () => {
       }, 1800)
     })
 
+    const unsubscribeLyrics = electron.ipcRenderer.on('lyrics-update', (data: LyricsData) => {
+      if (data.lines && data.lines.length > 0) {
+        setLyrics(data.lines)
+        setLyricsStatus('found')
+      } else {
+        setLyrics([])
+        setLyricsStatus('not-found')
+      }
+    })
+
     electron.ipcRenderer.send('get-battery-info')
 
     return () => {
@@ -100,15 +127,23 @@ export const DynamicIsland = () => {
       if (unsubscribeBatteryAlert) unsubscribeBatteryAlert()
       if (unsubscribeVolume) unsubscribeVolume()
       if (unsubscribeBrightness) unsubscribeBrightness()
+      if (unsubscribeLyrics) unsubscribeLyrics()
       if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current)
       if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current)
     }
   }, [])
 
-  // Reset img error when track changes
+  // Reset img error & lyrics when track changes
   useEffect(() => {
     setImgError(false)
-  }, [currentTrack?.artUrl, currentTrack?.title])
+    setLyrics([])
+    if (!currentTrack?.title || currentTrack.title === 'Not Playing' || currentTrack.title === 'Unknown') {
+      setShowLyrics(false)
+      setLyricsStatus('idle')
+    } else {
+      setLyricsStatus('loading')
+    }
+  }, [currentTrack?.title, currentTrack?.artist])
 
   const handleSeekClick = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation()
@@ -121,6 +156,28 @@ export const DynamicIsland = () => {
 
   const progressPercent = duration > 0 ? Math.min(100, Math.max(0, (position / duration) * 100)) : 0
   const remainingTime = duration > 0 ? Math.max(0, duration - position) : 0
+
+  // Find currently active lyric line index based on playback position
+  const activeLyricIndex = lyrics.findIndex((line, i) => {
+    const nextLine = lyrics[i + 1]
+    if (position >= line.time) {
+      if (!nextLine || position < nextLine.time) {
+        return true
+      }
+    }
+    return false
+  })
+  const currentLyric = activeLyricIndex >= 0 ? lyrics[activeLyricIndex] : null
+
+  // Auto-scroll lyrics container to keep active line centered
+  useEffect(() => {
+    if (showLyrics && lyricsContainerRef.current && activeLyricIndex >= 0) {
+      const activeEl = lyricsContainerRef.current.children[activeLyricIndex] as HTMLElement
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }
+  }, [activeLyricIndex, showLyrics])
 
   // Date & Time formatting (Indonesian)
   const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab']
@@ -382,7 +439,6 @@ export const DynamicIsland = () => {
         const electron = (window as any).electron
         electron?.ipcRenderer?.send('toggle-visibility')
       }}
-      title="Alt+D atau Klik Kanan untuk Sembunyikan / Munculkan"
     >
       {/* ================= HUD ALERT (Volume / Brightness Slider) ================= */}
       {isHudActive && !isExpanded ? (
@@ -547,16 +603,18 @@ export const DynamicIsland = () => {
                 <span
                   style={{
                     fontSize: '11px',
-                    fontWeight: 500,
-                    color: 'rgba(255, 255, 255, 0.95)',
+                    fontWeight: currentLyric ? 600 : 500,
+                    color: currentLyric ? '#38bdf8' : 'rgba(255, 255, 255, 0.95)',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     maxWidth: '120px',
-                    letterSpacing: '-0.01em'
+                    letterSpacing: '-0.01em',
+                    transition: 'color 0.2s ease'
                   }}
+                  title={currentLyric?.text ? `Lirik: ${currentLyric.text}` : currentTrack?.title}
                 >
-                  {currentTrack?.title || 'Playing'}
+                  {currentLyric?.text || currentTrack?.title || 'Playing'}
                 </span>
               </div>
               {renderVisualizer(true)}
@@ -588,170 +646,146 @@ export const DynamicIsland = () => {
         }}
       >
         {hasTrack ? (
-          <>
-            {/* ROW 1: Cover + Title/Artist + Equalizer */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
-                {/* 52x52 Album Cover */}
-                {renderCoverArt(52, 14, 24)}
-
-                {/* Title & Artist */}
-                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0, flex: 1 }}>
-                  <p
+          showLyrics ? (
+            /* ================= FULL KARAOKE LYRICS VIEW ================= */
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              {/* Top Bar in Lyrics mode */}
+              <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                  {renderCoverArt(24, 6, 12)}
+                  <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {currentTrack?.title}
+                    </span>
+                    <span style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.5)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {currentTrack?.artist}
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setShowLyrics(false)
+                      setIsHovered(false)
+                    }}
+                    title="Tutup Tampilan Lirik"
                     style={{
-                      margin: 0,
+                      background: 'rgba(255, 255, 255, 0.12)',
+                      border: 'none',
+                      borderRadius: '12px',
+                      padding: '3px 8px',
                       color: '#ffffff',
-                      fontSize: '15px',
-                      fontWeight: 600,
-                      letterSpacing: '-0.02em',
-                      lineHeight: '1.2',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      maxWidth: '200px'
+                      fontSize: '11px',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
                     }}
                   >
-                    {currentTrack?.title || 'No Media Playing'}
-                  </p>
-                  <p
-                    style={{
-                      margin: '3px 0 0 0',
-                      color: 'rgba(255, 255, 255, 0.6)',
-                      fontSize: '13px',
-                      fontWeight: 400,
-                      lineHeight: '1.2',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      maxWidth: '200px'
-                    }}
-                  >
-                    {currentTrack?.artist || 'Unknown Artist'}
-                  </p>
+                    ✕ Tutup
+                  </button>
                 </div>
               </div>
 
-              {/* Cyan Soundwave Visualizer on Right */}
-              <div style={{ paddingLeft: '4px', flexShrink: 0 }}>
-                {renderVisualizer(false)}
-              </div>
-            </div>
-
-            {/* ROW 2: Scrubber Bar + Timestamps */}
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              {/* Scrubber progress bar */}
+              {/* Scrollable Karaoke Lines */}
               <div
-                ref={progressRef}
-                onClick={handleSeekClick}
+                ref={lyricsContainerRef}
+                className="no-scrollbar"
                 style={{
-                  width: '100%',
-                  height: '4px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                  borderRadius: '9999px',
-                  cursor: 'pointer',
-                  position: 'relative',
-                  overflow: 'hidden'
+                  flex: 1,
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  padding: '10px 4px',
+                  margin: '4px 0',
+                  scrollbarWidth: 'none',
+                  msOverflowStyle: 'none',
+                  maskImage: 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)',
+                  WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)'
                 }}
               >
+                {lyrics.length > 0 ? (
+                  lyrics.map((line, idx) => {
+                    const isCurrent = idx === activeLyricIndex
+                    return (
+                      <p
+                        key={idx}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (line.time >= 0) {
+                            controls.seek(Math.floor(line.time))
+                          }
+                        }}
+                        style={{
+                          margin: 0,
+                          cursor: line.time >= 0 ? 'pointer' : 'default',
+                          fontSize: isCurrent ? '14px' : '12px',
+                          fontWeight: isCurrent ? 700 : 400,
+                          color: isCurrent ? '#38bdf8' : 'rgba(255, 255, 255, 0.35)',
+                          textShadow: isCurrent ? '0 0 12px rgba(56, 189, 248, 0.45)' : 'none',
+                          transform: isCurrent ? 'scale(1.02)' : 'scale(1)',
+                          transformOrigin: 'left center',
+                          transition: 'all 0.22s ease',
+                          lineHeight: '1.3'
+                        }}
+                      >
+                        {line.text}
+                      </p>
+                    )
+                  })
+                ) : lyricsStatus === 'loading' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'rgba(255, 255, 255, 0.5)', fontSize: '12px', gap: '8px' }}>
+                    <div style={{ width: '13px', height: '13px', border: '2px solid rgba(255, 255, 255, 0.2)', borderTopColor: '#38bdf8', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                    <span>Memuat lirik karaoke...</span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '6px', textAlign: 'center', padding: '0 16px' }}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.4)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 18V5l12-2v13" />
+                      <circle cx="6" cy="18" r="3" />
+                      <circle cx="18" cy="16" r="3" />
+                      <line x1="2" y1="2" x2="22" y2="22" stroke="rgba(239, 68, 68, 0.7)" strokeWidth="2" />
+                    </svg>
+                    <span style={{ fontSize: '11px', fontWeight: 500, color: 'rgba(255, 255, 255, 0.6)', lineHeight: '1.4' }}>
+                      Lirik lagu ini tidak tersedia di platform musik ini
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Scrubber & Mini Play/Pause */}
+              <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '4px' }}>
                 <div
+                  ref={progressRef}
+                  onClick={handleSeekClick}
                   style={{
-                    height: '100%',
-                    width: `${progressPercent}%`,
-                    backgroundColor: '#ffffff',
+                    flex: 1,
+                    height: '4px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
                     borderRadius: '9999px',
-                    transition: 'width 0.15s linear'
-                  }}
-                />
-              </div>
-
-              {/* Timestamps */}
-              <div
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: '11px',
-                  fontWeight: 500,
-                  color: 'rgba(255, 255, 255, 0.5)',
-                  fontVariantNumeric: 'tabular-nums',
-                  lineHeight: 1
-                }}
-              >
-                <span>{formatTime(position)}</span>
-                <span>{duration > 0 ? `-${formatTime(remainingTime)}` : '--:--'}</span>
-              </div>
-            </div>
-
-            {/* ROW 3: Star + Controls (Prev, Play/Pause, Next) + AirPlay */}
-            <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '2px' }}>
-              {/* Star / Favorite Button */}
-              <button
-                type="button"
-                aria-label="Favorite"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setIsStarred(!isStarred)
-                }}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: '4px',
-                  margin: '0 0 0 -4px',
-                  cursor: 'pointer',
-                  color: isStarred ? '#facc15' : 'rgba(255, 255, 255, 0.7)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  outline: 'none'
-                }}
-              >
-                <svg
-                  width="19"
-                  height="19"
-                  viewBox="0 0 24 24"
-                  fill={isStarred ? '#facc15' : 'none'}
-                  stroke={isStarred ? '#facc15' : 'currentColor'}
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                </svg>
-              </button>
-
-              {/* Center Playback Controls */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '28px' }}>
-                {/* Previous Track */}
-                <button
-                  type="button"
-                  aria-label="Previous"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    controls.previous()
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    padding: '4px',
                     cursor: 'pointer',
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    outline: 'none',
-                    transition: 'opacity 0.15s ease'
+                    overflow: 'hidden'
                   }}
                 >
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M11 6L3 12l8 6V6zm9 0l-8 6 8 6V6z" />
-                  </svg>
-                </button>
-
-                {/* Play / Pause Primary Button */}
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${progressPercent}%`,
+                      backgroundColor: '#38bdf8',
+                      borderRadius: '9999px',
+                      transition: 'width 0.15s linear'
+                    }}
+                  />
+                </div>
+                <span style={{ fontSize: '10px', color: 'rgba(255, 255, 255, 0.5)', fontVariantNumeric: 'tabular-nums' }}>
+                  {formatTime(position)}
+                </span>
                 <button
                   type="button"
-                  aria-label={isPlaying ? 'Pause' : 'Play'}
                   onClick={(e) => {
                     e.stopPropagation()
                     controls.playPause()
@@ -759,92 +793,317 @@ export const DynamicIsland = () => {
                   style={{
                     background: 'none',
                     border: 'none',
-                    padding: '4px',
-                    cursor: 'pointer',
+                    padding: '2px',
                     color: '#ffffff',
+                    cursor: 'pointer',
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    outline: 'none',
-                    transition: 'transform 0.15s ease'
+                    alignItems: 'center'
                   }}
                 >
                   {isPlaying ? (
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                     </svg>
                   ) : (
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M8 5v14l11-7z" />
                     </svg>
                   )}
                 </button>
+              </div>
+            </div>
+          ) : (
+            /* ================= NORMAL PLAYER VIEW ================= */
+            <>
+              {/* ROW 1: Cover + Title/Artist + Equalizer */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: 1 }}>
+                  {/* 52x52 Album Cover */}
+                  {renderCoverArt(52, 14, 24)}
 
-                {/* Next Track */}
+                  {/* Title & Artist */}
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0, flex: 1 }}>
+                    <p
+                      style={{
+                        margin: 0,
+                        color: '#ffffff',
+                        fontSize: '15px',
+                        fontWeight: 600,
+                        letterSpacing: '-0.02em',
+                        lineHeight: '1.2',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        maxWidth: '200px'
+                      }}
+                    >
+                      {currentTrack?.title || 'No Media Playing'}
+                    </p>
+                    <p
+                      style={{
+                        margin: '3px 0 0 0',
+                        color: 'rgba(255, 255, 255, 0.6)',
+                        fontSize: '13px',
+                        fontWeight: 400,
+                        lineHeight: '1.2',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        maxWidth: '200px'
+                      }}
+                    >
+                      {currentTrack?.artist || 'Unknown Artist'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Cyan Soundwave Visualizer on Right */}
+                <div style={{ paddingLeft: '4px', flexShrink: 0 }}>
+                  {renderVisualizer(false)}
+                </div>
+              </div>
+
+              {/* ROW 2: Scrubber Bar + Timestamps */}
+              <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                {/* Scrubber progress bar */}
+                <div
+                  ref={progressRef}
+                  onClick={handleSeekClick}
+                  style={{
+                    width: '100%',
+                    height: '4px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    borderRadius: '9999px',
+                    cursor: 'pointer',
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${progressPercent}%`,
+                      backgroundColor: '#ffffff',
+                      borderRadius: '9999px',
+                      transition: 'width 0.15s linear'
+                    }}
+                  />
+                </div>
+
+                {/* Timestamps */}
+                <div
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    color: 'rgba(255, 255, 255, 0.5)',
+                    fontVariantNumeric: 'tabular-nums',
+                    lineHeight: 1
+                  }}
+                >
+                  <span>{formatTime(position)}</span>
+                  <span>{duration > 0 ? `-${formatTime(remainingTime)}` : '--:--'}</span>
+                </div>
+              </div>
+
+              {/* ROW 3: Star + Controls (Prev, Play/Pause, Next) + Lyrics Toggle + AirPlay/Pin */}
+              <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '2px' }}>
+                {/* Star / Favorite Button */}
                 <button
                   type="button"
-                  aria-label="Next"
+                  aria-label="Favorite"
                   onClick={(e) => {
                     e.stopPropagation()
-                    controls.next()
+                    setIsStarred(!isStarred)
                   }}
                   style={{
                     background: 'none',
                     border: 'none',
                     padding: '4px',
+                    margin: '0 0 0 -4px',
                     cursor: 'pointer',
-                    color: '#ffffff',
+                    color: isStarred ? '#facc15' : 'rgba(255, 255, 255, 0.7)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    outline: 'none',
-                    transition: 'opacity 0.15s ease'
+                    outline: 'none'
                   }}
                 >
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M5 6l8 6-8 6V6zm9 0l8 6-8 6V6z" />
+                  <svg
+                    width="19"
+                    height="19"
+                    viewBox="0 0 24 24"
+                    fill={isStarred ? '#facc15' : 'none'}
+                    stroke={isStarred ? '#facc15' : 'currentColor'}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                   </svg>
                 </button>
-              </div>
 
-              {/* AirPlay / Output Button */}
-              <button
-                type="button"
-                aria-label="Audio Output"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setIsPinned(!isPinned)
-                }}
-                title={isPinned ? 'Unpin' : 'Pin Open'}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: '4px',
-                  margin: '0 -4px 0 0',
-                  cursor: 'pointer',
-                  color: isPinned ? '#38bdf8' : 'rgba(255, 255, 255, 0.7)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  outline: 'none'
-                }}
-              >
-                <svg
-                  width="19"
-                  height="19"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1" />
-                  <polygon points="12 15 17 21 7 21 12 15" />
-                </svg>
-              </button>
-            </div>
-          </>
+                {/* Center Playback Controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '28px' }}>
+                  {/* Previous Track */}
+                  <button
+                    type="button"
+                    aria-label="Previous"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      controls.previous()
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '4px',
+                      cursor: 'pointer',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      outline: 'none',
+                      transition: 'opacity 0.15s ease'
+                    }}
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M11 6L3 12l8 6V6zm9 0l-8 6 8 6V6z" />
+                    </svg>
+                  </button>
+
+                  {/* Play / Pause Primary Button */}
+                  <button
+                    type="button"
+                    aria-label={isPlaying ? 'Pause' : 'Play'}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      controls.playPause()
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '4px',
+                      cursor: 'pointer',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      outline: 'none',
+                      transition: 'transform 0.15s ease'
+                    }}
+                  >
+                    {isPlaying ? (
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+                      </svg>
+                    ) : (
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    )}
+                  </button>
+
+                  {/* Next Track */}
+                  <button
+                    type="button"
+                    aria-label="Next"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      controls.next()
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '4px',
+                      cursor: 'pointer',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      outline: 'none',
+                      transition: 'opacity 0.15s ease'
+                    }}
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M5 6l8 6-8 6V6zm9 0l8 6-8 6V6z" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Right Side: Lyrics Button + AirPlay / Pin Button */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {/* Lyrics Toggle Button */}
+                  <button
+                    type="button"
+                    aria-label="Toggle Lyrics"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setShowLyrics(true)
+                    }}
+                    title={lyricsStatus === 'not-found' ? 'Lirik lagu ini tidak tersedia' : 'Buka Lirik Karaoke'}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '4px',
+                      cursor: 'pointer',
+                      color: lyrics.length > 0 ? '#38bdf8' : lyricsStatus === 'not-found' ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.5)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      outline: 'none',
+                      transition: 'color 0.2s ease'
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 18V5l12-2v13" />
+                      <circle cx="6" cy="18" r="3" />
+                      <circle cx="18" cy="16" r="3" />
+                    </svg>
+                  </button>
+
+                  {/* Pin Button */}
+                  <button
+                    type="button"
+                    aria-label="Audio Output"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setIsPinned(!isPinned)
+                    }}
+                    title={isPinned ? 'Unpin' : 'Pin Open'}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '4px',
+                      margin: '0 -4px 0 0',
+                      cursor: 'pointer',
+                      color: isPinned ? '#38bdf8' : 'rgba(255, 255, 255, 0.7)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      outline: 'none'
+                    }}
+                  >
+                    <svg
+                      width="19"
+                      height="19"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1" />
+                      <polygon points="12 15 17 21 7 21 12 15" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </>
+          )
         ) : (
           <>
             {/* Widget Jam, Kalender, & Status Baterai saat tidak ada media diputar */}
