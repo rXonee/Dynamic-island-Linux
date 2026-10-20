@@ -42,6 +42,14 @@ interface LyricsData {
   notFound?: boolean
 }
 
+interface NotificationAlert {
+  id: string
+  appName: string
+  icon?: string
+  summary: string
+  body: string
+}
+
 export const DynamicIsland = () => {
   const [isHovered, setIsHovered] = useState(false)
   const [isPinned, setIsPinned] = useState(false)
@@ -52,12 +60,14 @@ export const DynamicIsland = () => {
   const [batteryAlert, setBatteryAlert] = useState<BatteryAlert | null>(null)
   const [volumeAlert, setVolumeAlert] = useState<VolumeAlert | null>(null)
   const [brightnessAlert, setBrightnessAlert] = useState<BrightnessAlert | null>(null)
+  const [notificationAlert, setNotificationAlert] = useState<NotificationAlert | null>(null)
   const [lyrics, setLyrics] = useState<LyricLine[]>([])
   const [lyricsStatus, setLyricsStatus] = useState<'idle' | 'loading' | 'found' | 'not-found'>('idle')
   const [showLyrics, setShowLyrics] = useState(false)
 
   const alertTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const hudTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const notifTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const progressRef = useRef<HTMLDivElement>(null)
   const lyricsContainerRef = useRef<HTMLDivElement>(null)
 
@@ -120,6 +130,14 @@ export const DynamicIsland = () => {
       }
     })
 
+    const unsubscribeNotif = electron.ipcRenderer.on('notification-alert', (alert: NotificationAlert) => {
+      setNotificationAlert(alert)
+      if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current)
+      notifTimeoutRef.current = setTimeout(() => {
+        setNotificationAlert(null)
+      }, 4500)
+    })
+
     electron.ipcRenderer.send('get-battery-info')
 
     return () => {
@@ -128,8 +146,10 @@ export const DynamicIsland = () => {
       if (unsubscribeVolume) unsubscribeVolume()
       if (unsubscribeBrightness) unsubscribeBrightness()
       if (unsubscribeLyrics) unsubscribeLyrics()
+      if (unsubscribeNotif) unsubscribeNotif()
       if (alertTimeoutRef.current) clearTimeout(alertTimeoutRef.current)
       if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current)
+      if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current)
     }
   }, [])
 
@@ -391,6 +411,78 @@ export const DynamicIsland = () => {
     </div>
   )
 
+  const getAppColor = (appName?: string) => {
+    const name = (appName || '').toLowerCase()
+    if (name.includes('telegram')) return '#229ED9'
+    if (name.includes('discord')) return '#5865F2'
+    if (name.includes('whatsapp')) return '#25D366'
+    if (name.includes('spotify')) return '#1db954'
+    if (name.includes('chrome') || name.includes('brave') || name.includes('firefox')) return '#38bdf8'
+    if (name.includes('code') || name.includes('cursor')) return '#007acc'
+    if (name.includes('terminal') || name.includes('konsole') || name.includes('kitty') || name.includes('bash')) return '#a855f7'
+    return '#f59e0b'
+  }
+
+  const renderAppIcon = (appName?: string) => {
+    const name = (appName || '').toLowerCase()
+    const color = getAppColor(appName)
+
+    let iconSvg = (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      </svg>
+    )
+
+    if (name.includes('telegram')) {
+      iconSvg = (
+        <svg width="28" height="28" viewBox="0 0 24 24" fill={color} style={{ flexShrink: 0 }}>
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8l-1.6 7.54c-.12.55-.44.68-.9.43l-2.46-1.81-1.19 1.15c-.13.13-.24.24-.49.24l.18-2.5 4.54-4.1c.2-.18-.04-.27-.31-.1l-5.61 3.53-2.43-.76c-.53-.17-.54-.53.11-.79l9.5-3.66c.44-.16.83.1.66.83z" />
+        </svg>
+      )
+    } else if (name.includes('discord')) {
+      iconSvg = (
+        <svg width="28" height="28" viewBox="0 0 24 24" fill={color} style={{ flexShrink: 0 }}>
+          <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
+        </svg>
+      )
+    } else if (name.includes('whatsapp')) {
+      iconSvg = (
+        <svg width="28" height="28" viewBox="0 0 24 24" fill={color} style={{ flexShrink: 0 }}>
+          <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2m.01 1.67c2.2 0 4.26.86 5.82 2.42a8.225 8.225 0 0 1 2.41 5.83c0 4.54-3.7 8.24-8.24 8.24-1.48 0-2.93-.4-4.2-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.196 8.196 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.24-8.24m4.52 11.66c-.25-.13-1.47-.72-1.7-.81-.23-.08-.39-.13-.56.13-.17.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.13-1.06-.39-2.03-1.25-.75-.67-1.26-1.5-1.41-1.75-.15-.25-.02-.39.11-.51.11-.11.25-.29.37-.44.13-.15.17-.25.25-.42.08-.17.04-.31-.02-.44-.06-.13-.56-1.35-.77-1.85-.2-.49-.41-.42-.56-.43h-.48c-.17 0-.44.06-.67.31-.23.25-.88.86-.88 2.1 0 1.24.9 2.44 1.03 2.61.13.17 1.78 2.72 4.31 3.81.6.26 1.07.42 1.44.54.61.19 1.17.16 1.61.1.49-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.14-1.18-.06-.12-.23-.19-.48-.32z" />
+        </svg>
+      )
+    } else if (name.includes('spotify')) {
+      iconSvg = (
+        <svg width="28" height="28" viewBox="0 0 24 24" fill={color} style={{ flexShrink: 0 }}>
+          <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.18.295-.563.387-.857.207-2.35-1.435-5.308-1.76-8.792-.963-.335.077-.67-.133-.746-.468-.077-.334.132-.67.467-.746 3.808-.87 7.076-.496 9.72 1.115.295.18.388.563.208.855zm1.226-2.724c-.226.367-.707.482-1.074.257-2.69-1.653-6.79-2.132-9.97-1.167-.413.125-.85-.106-.974-.52-.124-.413.106-.85.52-.973 3.633-1.102 8.147-.568 11.24 1.33.368.225.483.707.258 1.073zm.106-2.835C14.692 8.95 8.085 8.72 4.244 9.887c-.504.153-1.035-.133-1.188-.637-.152-.504.134-1.035.638-1.188 4.412-1.339 11.7-1.074 15.58 1.23.454.27.6.862.33 1.316-.27.454-.862.6-1.316.33z" />
+        </svg>
+      )
+    } else if (name.includes('chrome') || name.includes('brave') || name.includes('firefox')) {
+      iconSvg = (
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <circle cx="12" cy="12" r="10" />
+          <line x1="2" y1="12" x2="22" y2="12" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      )
+    } else if (name.includes('terminal') || name.includes('konsole') || name.includes('kitty') || name.includes('bash')) {
+      iconSvg = (
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <polyline points="4 17 10 11 4 5" />
+          <line x1="12" y1="19" x2="20" y2="19" />
+        </svg>
+      )
+    }
+
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, padding: '0 2px' }}>
+        {iconSvg}
+      </div>
+    )
+  }
+
+  const isNotificationActive = Boolean(notificationAlert)
   const isAlerting = Boolean(batteryAlert)
   const isHudActive = Boolean(volumeAlert || brightnessAlert)
 
@@ -399,11 +491,11 @@ export const DynamicIsland = () => {
       id="island"
       style={{
         margin: '8px auto 0 auto',
-        width: isExpanded ? '380px' : isHudActive ? '280px' : isAlerting ? '280px' : hasTrack ? '220px' : '255px',
-        height: isExpanded ? '165px' : (isHudActive || isAlerting) ? '44px' : '36px',
+        width: isExpanded ? '380px' : isNotificationActive ? '360px' : isHudActive ? '280px' : isAlerting ? '280px' : hasTrack ? '220px' : '255px',
+        height: isExpanded ? '165px' : isNotificationActive ? '56px' : (isHudActive || isAlerting) ? '44px' : '36px',
         backgroundColor: '#000000',
-        borderRadius: isExpanded ? '32px' : (isHudActive || isAlerting) ? '22px' : '20px',
-        padding: isExpanded ? '15px 18px 13px 18px' : (isHudActive || isAlerting) ? '8px 14px' : '6px 14px',
+        borderRadius: isExpanded ? '32px' : isNotificationActive ? '28px' : (isHudActive || isAlerting) ? '22px' : '20px',
+        padding: isExpanded ? '15px 18px 13px 18px' : isNotificationActive ? '10px 16px' : (isHudActive || isAlerting) ? '8px 14px' : '6px 14px',
         border: isAlerting
           ? batteryAlert?.type === 'plugged'
             ? '1px solid rgba(16, 185, 129, 0.4)'
@@ -440,8 +532,72 @@ export const DynamicIsland = () => {
         electron?.ipcRenderer?.send('toggle-visibility')
       }}
     >
-      {/* ================= HUD ALERT (Volume / Brightness Slider) ================= */}
-      {isHudActive && !isExpanded ? (
+      {/* ================= NOTIFICATION ALERT BANNER ================= */}
+      {isNotificationActive && !isExpanded ? (
+        <div
+          onClick={(e) => {
+            e.stopPropagation()
+            setNotificationAlert(null)
+          }}
+          title="Klik untuk tutup notifikasi"
+          style={{
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            cursor: 'pointer'
+          }}
+        >
+          {/* App Icon */}
+          {renderAppIcon(notificationAlert?.appName)}
+
+          {/* Texts */}
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1, justifyContent: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <span
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: '#ffffff',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  letterSpacing: '-0.01em'
+                }}
+              >
+                {notificationAlert?.summary || notificationAlert?.appName}
+              </span>
+              <span
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  color: 'rgba(255, 255, 255, 0.4)',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
+                {notificationAlert?.appName}
+              </span>
+            </div>
+
+            <span
+              style={{
+                fontSize: '12px',
+                fontWeight: 400,
+                color: 'rgba(255, 255, 255, 0.72)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                lineHeight: 1.35,
+                marginTop: '1px'
+              }}
+            >
+              {notificationAlert?.body || notificationAlert?.summary}
+            </span>
+          </div>
+        </div>
+      ) : isHudActive && !isExpanded ? (
         <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
           {/* Left Icon */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>

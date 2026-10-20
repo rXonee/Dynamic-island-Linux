@@ -568,6 +568,149 @@ function startBrightnessMonitor() {
   brightnessCheckTimer = setInterval(checkBrightness, 80)
 }
 
+// ---------- System Notification Monitor (DBus Monitor) ----------
+let notificationMonitorProcess = null
+let lastNotificationHash = ''
+let lastNotificationTime = 0
+
+function startNotificationMonitor() {
+  try {
+    if (notificationMonitorProcess) {
+      try { notificationMonitorProcess.kill() } catch {}
+      notificationMonitorProcess = null
+    }
+
+    notificationMonitorProcess = spawn('dbus-monitor', [
+      "interface='org.freedesktop.Notifications',member='Notify'"
+    ])
+
+    let buffer = ''
+
+    notificationMonitorProcess.stdout.on('data', (data) => {
+      buffer += data.toString()
+
+      while (true) {
+        const startIdx = buffer.indexOf('member=Notify')
+        if (startIdx === -1) {
+          if (buffer.length > 8192) buffer = buffer.slice(-2048)
+          break
+        }
+
+        const nextMsgIdx = buffer.indexOf('\nmethod call', startIdx + 13)
+        const nextSignalIdx = buffer.indexOf('\nsignal', startIdx + 13)
+        const int32Idx = buffer.indexOf('\n   int32', startIdx)
+
+        let endIdx = -1
+        if (int32Idx !== -1) {
+          endIdx = int32Idx + 12
+        } else if (nextMsgIdx !== -1) {
+          endIdx = nextMsgIdx
+        } else if (nextSignalIdx !== -1) {
+          endIdx = nextSignalIdx
+        }
+
+        if (endIdx === -1) {
+          if (buffer.length - startIdx > 12000) {
+            buffer = buffer.slice(startIdx + 13)
+          }
+          break
+        }
+
+        const fullBlock = buffer.slice(startIdx, endIdx)
+        buffer = buffer.slice(endIdx)
+
+        // Only parse the header part before array [ for strings
+        const arrayIdx = fullBlock.indexOf('array [')
+        const headerBlock = arrayIdx !== -1 ? fullBlock.slice(0, arrayIdx) : fullBlock
+
+        const strings = []
+        let idx = 0
+        while (true) {
+          const sPos = headerBlock.indexOf('string "', idx)
+          if (sPos === -1) break
+          const contentStart = sPos + 8
+          let endPos = contentStart
+          while (endPos < headerBlock.length) {
+            if (headerBlock[endPos] === '"' && headerBlock[endPos - 1] !== '\\') {
+              const after = headerBlock.slice(endPos + 1, endPos + 20)
+              if (/^\s*(\n|$)/.test(after)) break
+            }
+            endPos++
+          }
+          strings.push(headerBlock.slice(contentStart, endPos))
+          idx = endPos + 1
+        }
+
+        let appName = (strings[0] || 'Aplikasi').trim()
+        const icon = (strings[1] || '').trim()
+        const summary = (strings[2] || '').trim()
+        const body = (strings[3] || '').trim()
+
+        if (!summary && !body) continue
+
+        // Auto-detect web apps (WhatsApp Web, Telegram Web, Discord Web) from browsers
+        const isBrowser = /^(brave|chrome|google-chrome|chromium|firefox|opera|vivaldi|edge)/i.test(appName)
+        if (isBrowser) {
+          const lowerBlock = fullBlock.toLowerCase()
+          if (lowerBlock.includes('web.whatsapp.com') || lowerBlock.includes('whatsapp')) {
+            appName = 'WhatsApp'
+          } else if (lowerBlock.includes('telegram.org') || lowerBlock.includes('web.telegram.org') || lowerBlock.includes('webk.telegram.org') || lowerBlock.includes('webz.telegram.org') || lowerBlock.includes('telegram')) {
+            appName = 'Telegram'
+          } else if (lowerBlock.includes('discord.com') || lowerBlock.includes('discord')) {
+            appName = 'Discord'
+          }
+        }
+
+        // Clean & normalize appName (e.g. telegram-desktop, org.telegram.desktop -> Telegram)
+        const lowerApp = appName.toLowerCase()
+        if (lowerApp.includes('telegram')) {
+          appName = 'Telegram'
+        } else if (lowerApp.includes('whatsapp')) {
+          appName = 'WhatsApp'
+        } else if (lowerApp.includes('discord')) {
+          appName = 'Discord'
+        } else if (lowerApp.includes('spotify')) {
+          appName = 'Spotify'
+        }
+
+        const hash = `${appName}:${summary}:${body}`
+        const now = Date.now()
+        if (hash === lastNotificationHash && now - lastNotificationTime < 800) {
+          continue
+        }
+        lastNotificationHash = hash
+        lastNotificationTime = now
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          console.log('Notification intercepted:', { appName, summary, body })
+          mainWindow.webContents.send('notification-alert', {
+            id: String(now),
+            appName,
+            icon,
+            summary,
+            body
+          })
+        }
+      }
+    })
+
+    notificationMonitorProcess.on('error', (err) => {
+      console.warn('Notification monitor error:', err.message)
+    })
+
+    notificationMonitorProcess.on('close', () => {
+      notificationMonitorProcess = null
+      setTimeout(() => {
+        if (!app.isQuitting) startNotificationMonitor()
+      }, 3000)
+    })
+
+    console.log('Started system notification monitor')
+  } catch (err) {
+    console.warn('Failed to start notification monitor:', err.message)
+  }
+}
+
 // ---------- App lifecycle ----------
 
 app.whenReady().then(() => {
@@ -576,6 +719,7 @@ app.whenReady().then(() => {
   startBatteryMonitor()
   startVolumeMonitor()
   startBrightnessMonitor()
+  startNotificationMonitor()
 
   try {
     globalShortcut.register('Alt+D', () => {
@@ -592,6 +736,9 @@ app.on('will-quit', () => {
   if (brightnessCheckTimer) clearInterval(brightnessCheckTimer)
   if (pactlSubProcess) {
     try { pactlSubProcess.kill() } catch {}
+  }
+  if (notificationMonitorProcess) {
+    try { notificationMonitorProcess.kill() } catch {}
   }
   globalShortcut.unregisterAll()
 })
